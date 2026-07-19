@@ -46,8 +46,11 @@ function AppContent() {
   if (error) return <ErrorScreen message={error} />
 
   if (!user) {
-    // No token in URL and no user in state — shouldn't normally happen
-    // (the Society app always redirects with a token), but handle gracefully.
+    // DEV ONLY: if no token, use a mock user so you can see the UI.
+    // Remove this block before production.
+    if (import.meta.env.DEV) {
+      return <ChatPage />
+    }
     return <ErrorScreen message="No session found. Please open Chat from the Society app." />
   }
 

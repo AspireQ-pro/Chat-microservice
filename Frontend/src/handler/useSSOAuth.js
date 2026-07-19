@@ -26,7 +26,18 @@ export function useSSOAuth() {
     const params = new URLSearchParams(window.location.search)
     const token  = params.get('token')
 
-    if (!token) return
+    // DEV bypass: if no token, inject a mock user so the UI is testable
+    // without needing the Society app. Remove before production.
+    if (!token) {
+      if (import.meta.env.DEV) {
+        dispatch({ type: 'auth/loginWithSSOToken/fulfilled', payload: {
+          id:    import.meta.env.VITE_DEV_USER_ID    || 'dev-user-001',
+          name:  import.meta.env.VITE_DEV_USER_NAME  || 'Dev User',
+          email: import.meta.env.VITE_DEV_USER_EMAIL || 'dev@example.com',
+        }})
+      }
+      return
+    }
 
     // Remove the token from the URL before doing anything else.
     // replaceState keeps the current history entry — no extra back-stack entry.
