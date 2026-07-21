@@ -7,13 +7,11 @@ RUN npm install
 
 COPY . .
 
-# Vite reads env vars at BUILD time not runtime
-# These are passed from docker-compose as build args
-ARG VITE_CHAT_API_URL=http://localhost:5000
-ARG VITE_CHAT_API_KEY=your-api-key-here
+ARG VITE_API_URL=http://localhost:5000
+ARG VITE_SOCKET_URL=http://localhost:5000
 
-ENV VITE_CHAT_API_URL=$VITE_CHAT_API_URL
-ENV VITE_CHAT_API_KEY=$VITE_CHAT_API_KEY
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_SOCKET_URL=$VITE_SOCKET_URL
 
 RUN npm run build
 
