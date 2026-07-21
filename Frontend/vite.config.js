@@ -5,7 +5,12 @@ import path from 'path'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5174,
+    port: 3001,
+    host: true,
+  },
+  preview: {
+    port: 3001,
+    host: true,
   },
   resolve: {
     alias: {

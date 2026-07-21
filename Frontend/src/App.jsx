@@ -1,6 +1,8 @@
 import { Box, CircularProgress, Typography, createTheme, ThemeProvider, CssBaseline } from '@mui/material'
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import { useSSOAuth } from '@/handler/useSSOAuth'
 import ChatPage from '@/ChatPage'
+import RegisterProject from '@/components/RegisterProject'
 
 const theme = createTheme({
   palette: {
@@ -49,7 +51,12 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <AppContent />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<AppContent />} />
+          <Route path="/register" element={<RegisterProject />} />
+        </Routes>
+      </BrowserRouter>
     </ThemeProvider>
   )
 }

@@ -1,28 +1,31 @@
 version: "3.8"
 
 services:
-  chat-service:
+  chat-backend:
     build: ./Backend
-    container_name: chat-service
+    container_name: chat-backend
     ports:
       - "5000:5000"
     environment:
-      # If PostgreSQL runs on your host machine (not in Docker):
-      DATABASE_URL: "postgresql://postgres:postgres@host.docker.internal:5432/chat_db"
+      DATABASE_URL: "postgresql://postgres:Yogesh@1234@host.docker.internal:5432/chat_service"
+      BACKEND_URL: "http://localhost:5000"
+      JWT_SECRET: "your-shared-secret-here"
       PORT: "5000"
     volumes:
       - chat_uploads:/app/uploads
     restart: unless-stopped
-    # If PostgreSQL is in a Docker container, uncomment below:
-    # networks:
-    #   - default
-    #   - postgres_network
+
+  chat-frontend:
+    build: ./Frontend
+    container_name: chat-frontend
+    ports:
+      - "3001:80"
+    environment:
+      VITE_CHAT_API_URL: "http://localhost:5000"
+      VITE_CHAT_API_KEY: "your-api-key-here"
+    depends_on:
+      - chat-backend
+    restart: unless-stopped
 
 volumes:
   chat_uploads:
-
-# If PostgreSQL is in Docker, add its network here:
-# networks:
-#   postgres_network:
-#     external: true
-#     name: <your-postgres-network-name>
