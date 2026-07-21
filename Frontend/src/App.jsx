@@ -12,7 +12,6 @@ const theme = createTheme({
   },
 })
 
-// ─── Loading screen ───────────────────────────────────────────────────────────
 function LoadingScreen() {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -23,7 +22,6 @@ function LoadingScreen() {
   )
 }
 
-// ─── Error screen ─────────────────────────────────────────────────────────────
 function ErrorScreen({ message }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -31,28 +29,18 @@ function ErrorScreen({ message }) {
       <Typography variant="h6" color="error" fontWeight={600}>Unable to sign in</Typography>
       <Typography variant="body2" color="text.secondary">{message}</Typography>
       <Typography variant="caption" color="text.disabled" sx={{ mt: 1 }}>
-        Please go back to the Society app and try opening Chat again.
+        Please go back to the app and try opening Chat again.
       </Typography>
     </Box>
   )
 }
 
-// ─── Root App ─────────────────────────────────────────────────────────────────
 function AppContent() {
   const { user, loading, error } = useSSOAuth()
 
   if (loading) return <LoadingScreen />
-
   if (error) return <ErrorScreen message={error} />
-
-  if (!user) {
-    // DEV ONLY: if no token, use a mock user so you can see the UI.
-    // Remove this block before production.
-    if (import.meta.env.DEV) {
-      return <ChatPage />
-    }
-    return <ErrorScreen message="No session found. Please open Chat from the Society app." />
-  }
+  if (!user) return <ErrorScreen message="No session found." />
 
   return <ChatPage />
 }

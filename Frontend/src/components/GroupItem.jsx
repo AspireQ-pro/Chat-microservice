@@ -36,16 +36,9 @@ function GroupItem({ room, active, onClick }) {
             </Typography>
           }
           secondary={
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.3 }}>
-              <Chip
-                label="group"
-                size="small"
-                sx={{ height: 16, fontSize: '0.6rem', bgcolor: '#ede7f6', color: '#5e35b1', borderRadius: 1 }}
-              />
-              <Typography variant="caption" color="text.disabled">
-                {room.members?.length ?? 0} members
-              </Typography>
-            </Box>
+            <Typography variant="caption" color="text.disabled" noWrap sx={{ display: 'block', mt: 0.2 }}>
+              {room.lastMessagePreview || `${room.members?.length ?? 0} members`}
+            </Typography>
           }
         />
       </ListItem>

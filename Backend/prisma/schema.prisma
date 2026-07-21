@@ -6,22 +6,45 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
+model Project {
   id        String   @id @default(uuid())
   name      String
-  email     String   @unique
+  apiKey    String   @unique
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  rooms     ChatRoomMember[]
-  messages  Message[]
+  users     ChatUser[]
+  rooms     ChatRoom[]
+}
+
+model ChatUser {
+  id             String   @id @default(uuid())
+  projectId      String
+  externalUserId String
+  name           String
+  email          String?
+  avatarUrl      String?
+  lastSeenAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  project        Project           @relation(fields: [projectId], references: [id])
+  rooms          ChatRoomMember[]
+  messages       Message[]
+
+  @@unique([projectId, externalUserId])
+  @@index([projectId, name])
 }
 
 model ChatRoom {
-  id        String   @id @default(uuid())
-  name      String?
-  isGroup   Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id                String   @id @default(uuid())
+  projectId         String
+  name              String?
+  isGroup           Boolean  @default(false)
+  lastMessageAt     DateTime?
+  lastMessagePreview String?
+  createdAt         DateTime @default(now())
 
+  project   Project           @relation(fields: [projectId], references: [id])
   members   ChatRoomMember[]
   messages  Message[]
 }
@@ -32,22 +55,25 @@ model ChatRoomMember {
   joinedAt DateTime @default(now())
 
   room     ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     ChatUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([roomId, userId])
 }
 
 model Message {
-  id         String   @id @default(uuid())
-  roomId     String
-  senderId   String
-  content    String?
-  fileUrl    String?
-  fileType   String?  // "image" | "file"
-  createdAt  DateTime @default(now())
+  id          String   @id @default(uuid())
+  roomId      String
+  senderId    String
+  content     String?
+  messageType String   @default("text")
+  fileUrl     String?
+  fileType    String?
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
 
   room       ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  sender     User     @relation(fields: [senderId], references: [id])
+  sender     ChatUser @relation(fields: [senderId], references: [id])
 
   @@index([roomId, createdAt])
 }

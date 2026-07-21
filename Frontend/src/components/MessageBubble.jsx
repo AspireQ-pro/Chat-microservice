@@ -27,32 +27,31 @@ function MessageBubble({ message }) {
         )}
         {message.fileUrl && message.fileType === 'image' && (
           <Box
-            component="img"
-            src={message.fileUrl}
-            alt="attachment"
+            component="img" src={message.fileUrl} alt="attachment"
             sx={{ maxWidth: '100%', borderRadius: 1, mb: message.text ? 0.5 : 0 }}
           />
         )}
         {message.fileUrl && message.fileType === 'file' && (
           <Box
-            component="a"
-            href={message.fileUrl}
-            target="_blank"
-            rel="noreferrer"
+            component="a" href={message.fileUrl} target="_blank" rel="noreferrer"
             sx={{ display: 'block', color: 'inherit', mb: message.text ? 0.5 : 0 }}
           >
-            📎 Download file
+            📎 File
           </Box>
         )}
         {message.text && (
           <Typography variant="body2" sx={{ lineHeight: 1.5 }}>{message.text}</Typography>
         )}
-        <Typography
-          variant="caption"
-          sx={{ display: 'block', textAlign: 'right', mt: 0.5, opacity: 0.7, fontSize: '0.65rem' }}
-        >
-          {message.time}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.3, mt: 0.3 }}>
+          <Typography variant="caption" sx={{ opacity: 0.7, fontSize: '0.65rem' }}>
+            {message.time}
+          </Typography>
+          {message.mine && (
+            <Typography variant="caption" sx={{ fontSize: '0.6rem', opacity: message.isRead ? 1 : 0.5 }}>
+              {message.isRead ? '✓✓' : '✓'}
+            </Typography>
+          )}
+        </Box>
       </Box>
     </Box>
   )

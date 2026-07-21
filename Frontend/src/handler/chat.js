@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { useTheme, useMediaQuery } from '@mui/material'
-import socket from '@/services/socket'
+import getSocket, { connectSocket } from '@/services/socket'
 import {
   setActiveRoom,
   receiveMessage,
@@ -13,24 +13,24 @@ import {
   openDirectRoom,
   fetchMessages,
   createGroup,
+  markMessagesRead,
 } from '@/provider/chatSlice'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
-// ─── Role label color map ─────────────────────────────────────────────────────
 export const ROLE_COLOR = {
   member:   { bgcolor: '#e3f2fd', color: '#1565c0' },
   security: { bgcolor: '#fce4ec', color: '#c62828' },
   admin:    { bgcolor: '#e8f5e9', color: '#2e7d32' },
 }
 
-// ─── Main chat logic hook ─────────────────────────────────────────────────────
 export function useChatHandler() {
   const dispatch  = useDispatch()
   const theme     = useTheme()
   const isMobile  = useMediaQuery(theme.breakpoints.down('md'))
 
-  const currentUser  = useSelector((s) => s.auth.user)
+  const currentUser = useSelector((s) => s.auth.user)
+  const authToken   = useSelector((s) => s.auth.token)
   const activeRoomId = useSelector((s) => s.chat.activeRoomId)
   const allMessages  = useSelector((s) => s.chat.messages)
   const contacts     = useSelector((s) => s.chat.contacts)
@@ -48,6 +48,7 @@ export function useChatHandler() {
   const [groupCreating,   setGroupCreating]   = useState(false)
   const [groupError,      setGroupError]      = useState('')
 
+  const searchTimer = useRef(null)
   const messagesEndRef = useRef(null)
   const fileInputRef   = useRef(null)
 
@@ -60,8 +61,6 @@ export function useChatHandler() {
         id:      activeRoom.id,
         name:    activeRoom.name,
         avatar:  activeRoom.name?.slice(0, 2).toUpperCase() || 'GR',
-        role:    'member',
-        flat:    '',
         online:  false,
         isGroup: true,
       }
@@ -80,70 +79,92 @@ export function useChatHandler() {
   }))
 
   const filteredContacts = contacts.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.role || '').toLowerCase().includes(search.toLowerCase())
+    c.name.toLowerCase().includes(search.toLowerCase())
   )
 
-  // Bootstrap: load users + rooms once the user is known
+  // Connect socket and load users/rooms once we have auth
+  useEffect(() => {
+    if (!currentUser?.id || !authToken) return
+
+    // Connect socket with auth token
+    const socket = authToken !== 'dev-mock-token' ? connectSocket(authToken) : null
+
+    if (socket) {
+      const onConnect    = () => {
+        dispatch(setConnected(true))
+        socket.emit('user_online', currentUser.id)
+      }
+      const onDisconnect = () => dispatch(setConnected(false))
+      const onOnline     = (ids) => dispatch(setOnlineUsers(ids))
+
+      socket.on('connect',      onConnect)
+      socket.on('disconnect',   onDisconnect)
+      socket.on('online_users', onOnline)
+
+      if (socket.connected) {
+        dispatch(setConnected(true))
+        socket.emit('user_online', currentUser.id)
+      }
+
+      return () => {
+        socket.off('connect',      onConnect)
+        socket.off('disconnect',   onDisconnect)
+        socket.off('online_users', onOnline)
+      }
+    }
+  }, [dispatch, currentUser?.id, authToken])
+
+  // Load users and rooms
   useEffect(() => {
     if (!currentUser?.id) return
-    dispatch(fetchUsers(currentUser.id))
+    dispatch(fetchUsers({ excludeId: currentUser.id }))
     dispatch(fetchMyRooms(currentUser.id))
   }, [dispatch, currentUser?.id])
 
-  // Socket lifecycle
+  // Search with debounce
   useEffect(() => {
-    const onConnect    = () => {
-      dispatch(setConnected(true))
-      if (currentUser?.id) socket.emit('user_online', currentUser.id)
-    }
-    const onDisconnect = () => dispatch(setConnected(false))
-    const onOnline     = (ids) => dispatch(setOnlineUsers(ids))
+    if (!currentUser?.id) return
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => {
+      dispatch(fetchUsers({ excludeId: currentUser.id, q: search || undefined }))
+    }, 300)
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
+  }, [dispatch, search, currentUser?.id])
 
-    socket.on('connect',      onConnect)
-    socket.on('disconnect',   onDisconnect)
-    socket.on('online_users', onOnline)
-
-    if (socket.connected && currentUser?.id) {
-      dispatch(setConnected(true))
-      socket.emit('user_online', currentUser.id)
-    }
-
-    return () => {
-      socket.off('connect',      onConnect)
-      socket.off('disconnect',   onDisconnect)
-      socket.off('online_users', onOnline)
-    }
-  }, [dispatch, currentUser?.id])
-
-  // Join room + fetch history when active room changes
+  // Join room + fetch history + mark as read when active room changes
   useEffect(() => {
     if (!activeRoomId) return
-    socket.emit('join_room', activeRoomId)
+
+    const socket = getSocket()
+    if (socket) socket.emit('join_room', activeRoomId)
+
     dispatch(fetchMessages(activeRoomId))
+    if (currentUser?.id) dispatch(markMessagesRead({ roomId: activeRoomId, userId: currentUser.id }))
 
-    const onNewMessage = (message) => {
-      if (message.roomId === activeRoomId) {
-        dispatch(receiveMessage({
-          roomId: activeRoomId,
-          message: {
-            id:         message.id,
-            senderId:   message.senderId,
-            senderName: message.sender?.name || '',
-            text:       message.content  || '',
-            fileUrl:    message.fileUrl  || null,
-            fileType:   message.fileType || null,
-            time:       new Date(message.createdAt).toLocaleTimeString([], {
-              hour: '2-digit', minute: '2-digit',
-            }),
-            mine: false,
-          },
-        }))
+    if (socket) {
+      const onNewMessage = (message) => {
+        if (message.roomId === activeRoomId) {
+          dispatch(receiveMessage({
+            roomId: activeRoomId,
+            message: {
+              id:         message.id,
+              senderId:   message.senderId,
+              senderName: message.sender?.name || '',
+              text:       message.content  || '',
+              fileUrl:    message.fileUrl  || null,
+              fileType:   message.fileType || null,
+              time:       new Date(message.createdAt).toLocaleTimeString([], {
+                hour: '2-digit', minute: '2-digit',
+              }),
+              mine: false,
+            },
+          }))
+        }
       }
-    }
 
-    socket.on('new_message', onNewMessage)
-    return () => socket.off('new_message', onNewMessage)
+      socket.on('new_message', onNewMessage)
+      return () => socket.off('new_message', onNewMessage)
+    }
   }, [dispatch, activeRoomId])
 
   // Auto-scroll
@@ -186,13 +207,16 @@ export function useChatHandler() {
     }
     dispatch(appendMessage({ roomId: activeRoomId, message: optimistic }))
 
-    socket.emit('send_message', {
-      roomId:   activeRoomId,
-      senderId: currentUser.id,
-      content:  input.trim() || null,
-      fileUrl,
-      fileType,
-    })
+    const socket = getSocket()
+    if (socket) {
+      socket.emit('send_message', {
+        roomId:   activeRoomId,
+        senderId: currentUser.id,
+        content:  input.trim() || null,
+        fileUrl,
+        fileType,
+      })
+    }
 
     setInput('')
     setSelectedFile(null)
@@ -226,9 +250,8 @@ export function useChatHandler() {
         r.members?.some((m) => m.userId === currentUser?.id)
     )
     if (!room) return null
-    const msgs = allMessages[room.id]
-    return msgs?.length ? msgs[msgs.length - 1].text : null
-  }, [rooms, allMessages, currentUser?.id])
+    return room.lastMessagePreview || null
+  }, [rooms, currentUser?.id])
 
   const openGroupDialog = useCallback(() => {
     setGroupName(''); setGroupMemberIds([]); setGroupError(''); setGroupDialogOpen(true)

@@ -1,13 +1,12 @@
 import React from 'react'
-import {
-  Box, Typography, Avatar, Badge,
-  List, ListItem, ListItemAvatar, ListItemText, Divider, Chip,
-} from '@mui/material'
+import { Box, Typography, Avatar, Badge, ListItem, ListItemAvatar, ListItemText, Divider } from '@mui/material'
 import { Circle } from '@mui/icons-material'
-import { ROLE_COLOR } from '@/handler/chat'
 
 function ContactItem({ contact, active, lastMessage, unread, onClick }) {
-  const roleStyle = ROLE_COLOR[contact.role] || ROLE_COLOR.member
+  const lastSeen = contact.lastSeenAt
+    ? new Date(contact.lastSeenAt).toLocaleDateString()
+    : null
+
   return (
     <>
       <ListItem
@@ -46,25 +45,16 @@ function ContactItem({ contact, active, lastMessage, unread, onClick }) {
                 {contact.name}
               </Typography>
               {unread > 0 && (
-                <Chip
-                  label={unread}
-                  size="small"
-                  sx={{ height: 18, fontSize: '0.65rem', bgcolor: '#1565C0', color: '#fff', minWidth: 22 }}
-                />
+                <Box sx={{ bgcolor: '#1565C0', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 700 }}>{unread}</Typography>
+                </Box>
               )}
             </Box>
           }
           secondary={
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.3 }}>
-              <Chip
-                label={contact.role}
-                size="small"
-                sx={{ height: 16, fontSize: '0.6rem', ...roleStyle, borderRadius: 1 }}
-              />
-              <Typography variant="caption" color="text.disabled" noWrap sx={{ maxWidth: 90 }}>
-                {lastMessage || ''}
-              </Typography>
-            </Box>
+            <Typography variant="caption" color="text.disabled" noWrap sx={{ maxWidth: 140, display: 'block', mt: 0.2 }}>
+              {lastMessage || (contact.online ? 'Online' : (lastSeen ? `Last seen ${lastSeen}` : ''))}
+            </Typography>
           }
         />
       </ListItem>
