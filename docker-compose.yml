@@ -40,8 +40,8 @@ services:
     build:
       context: ./Frontend
       args:
-        VITE_API_URL: "http://localhost:5000"
-        VITE_SOCKET_URL: "http://localhost:5000"
+        VITE_API_URL: "http://3.110.56.109:5000"
+        VITE_SOCKET_URL: "http://3.110.56.109:5000"
     container_name: chat-frontend
     ports:
       - "3001:3001"
