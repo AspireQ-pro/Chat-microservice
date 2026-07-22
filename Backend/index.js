@@ -352,8 +352,16 @@ io.on("connection", (socket) => {
   socket.on("user_online", (userId) => {
     onlineUsers.set(socket.id, { userId, projectId: socket.projectId });
     broadcastOnlineUsers(socket.projectId);
-    // Update lastSeenAt in background
     prisma.chatUser.update({ where: { id: userId }, data: { lastSeenAt: new Date() } }).catch(() => {});
+  });
+
+  socket.on("get_online_users", () => {
+    const userIds = [...new Set(
+      [...onlineUsers.values()]
+        .filter((u) => u.projectId === socket.projectId)
+        .map((u) => u.userId)
+    )];
+    socket.emit("online_users", userIds);
   });
 
   socket.on("join_room", (roomId) => {

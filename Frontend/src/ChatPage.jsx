@@ -13,7 +13,7 @@ function ChatPage() {
     filteredContacts, contacts, rooms, messagesEndRef,
     setInput, setSearch, setShowPanel, setGroupName,
     handleSend, handleKeyDown, handleSelectContact,
-    getLastMessage, handleSelectRoom,
+    getLastMessage, getUnreadCount, unreadCounts, handleSelectRoom,
     selectedFile, fileInputRef, uploading, handleFileChange, handleRemoveFile,
     groupDialogOpen, groupName, groupMemberIds, groupCreating, groupError,
     openGroupDialog, closeGroupDialog, toggleGroupMember, handleCreateGroup,
@@ -30,6 +30,8 @@ function ChatPage() {
       contacts={contacts}
       rooms={rooms}
       getLastMessage={getLastMessage}
+      getUnreadCount={getUnreadCount}
+      unreadCounts={unreadCounts}
       handleSelectContact={handleSelectContact}
       handleSelectRoom={handleSelectRoom}
       activeRoomId={activeRoomId}

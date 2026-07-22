@@ -1,10 +1,10 @@
 import React from 'react'
 import {
   Box, Typography, Avatar,
-  ListItem, ListItemAvatar, ListItemText, Divider, Chip,
+  ListItem, ListItemAvatar, ListItemText, Divider,
 } from '@mui/material'
 
-function GroupItem({ room, active, onClick }) {
+function GroupItem({ room, active, unread = 0, onClick }) {
   const avatar = room.name?.slice(0, 2).toUpperCase() || 'GR'
   return (
     <>
@@ -31,12 +31,27 @@ function GroupItem({ room, active, onClick }) {
         </ListItemAvatar>
         <ListItemText
           primary={
-            <Typography variant="body2" fontWeight={500} noWrap sx={{ maxWidth: 150 }}>
-              {room.name}
-            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="body2" fontWeight={unread ? 700 : 500} noWrap sx={{ maxWidth: 130 }}>
+                {room.name}
+              </Typography>
+              {unread > 0 && (
+                <Box sx={{ bgcolor: '#1565C0', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 700 }}>{unread}</Typography>
+                </Box>
+              )}
+            </Box>
           }
           secondary={
-            <Typography variant="caption" color="text.disabled" noWrap sx={{ display: 'block', mt: 0.2 }}>
+            <Typography
+              variant="caption"
+              noWrap
+              sx={{
+                display: 'block', mt: 0.2,
+                fontWeight: unread ? 700 : 400,
+                color: unread ? 'text.primary' : 'text.disabled',
+              }}
+            >
               {room.lastMessagePreview || `${room.members?.length ?? 0} members`}
             </Typography>
           }

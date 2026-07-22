@@ -106,6 +106,7 @@ const chatSlice = createSlice({
     rooms: [],
     activeRoomId: null,
     messages: {},
+    unreadCounts: {},
     loading: false,
     error: null,
     connected: false,
@@ -120,13 +121,22 @@ const chatSlice = createSlice({
       const exists = state.messages[roomId].some((m) => m.id === message.id)
       if (!exists) state.messages[roomId].push(message)
 
-      // Update room preview
-      const room = state.rooms.find((r) => r.id === roomId)
-      if (room) {
+      // Increment unread if not active room
+      if (state.activeRoomId !== roomId) {
+        state.unreadCounts[roomId] = (state.unreadCounts[roomId] || 0) + 1
+      }
+
+      // Update room preview and move to top
+      const roomIndex = state.rooms.findIndex((r) => r.id === roomId)
+      if (roomIndex !== -1) {
+        const room = state.rooms[roomIndex]
         room.lastMessagePreview = message.fileUrl
           ? (message.fileType === 'image' ? '📷 Photo' : '📎 File')
           : (message.text || '')
         room.lastMessageAt = new Date().toISOString()
+        // Move to top
+        state.rooms.splice(roomIndex, 1)
+        state.rooms.unshift(room)
       }
     },
     appendMessage(state, { payload }) {
@@ -226,6 +236,7 @@ const chatSlice = createSlice({
           if (!m.mine) { m.isRead = true; m.readAt = new Date().toISOString() }
         })
       }
+      state.unreadCounts[roomId] = 0
     })
   },
 })

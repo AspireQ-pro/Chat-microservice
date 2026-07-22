@@ -25,7 +25,7 @@ export function useSSOAuth() {
     const tokenFromUrl = params.get('token')
 
     if (!tokenFromUrl) {
-      if (import.meta.env.DEV) {
+      if (import.meta.env.DEV || import.meta.env.VITE_ALLOW_DEV_LOGIN === 'true') {
         dispatch(setAuth({
           token: 'dev-mock-token',
           user: {

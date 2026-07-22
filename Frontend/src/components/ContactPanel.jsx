@@ -10,7 +10,8 @@ import GroupItem from './GroupItem'
 function ContactPanel({
   isMobile, search, setSearch,
   filteredContacts, contacts, rooms,
-  getLastMessage, handleSelectContact, handleSelectRoom,
+  getLastMessage, getUnreadCount, unreadCounts,
+  handleSelectContact, handleSelectRoom,
   activeRoomId, openGroupDialog,
 }) {
   const [activeTab, setActiveTab] = useState(0)
@@ -114,7 +115,7 @@ function ContactPanel({
                   contact={contact}
                   active={false}
                   lastMessage={getLastMessage(contact.id)}
-                  unread={0}
+                  unread={getUnreadCount(contact.id)}
                   onClick={() => handleSelectContact(contact.id)}
                 />
               ))
@@ -136,6 +137,7 @@ function ContactPanel({
                   key={room.id}
                   room={room}
                   active={room.id === activeRoomId}
+                  unread={unreadCounts[room.id] || 0}
                   onClick={() => handleSelectRoom(room)}
                 />
               ))

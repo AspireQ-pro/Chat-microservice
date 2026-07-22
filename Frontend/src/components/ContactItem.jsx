@@ -52,7 +52,15 @@ function ContactItem({ contact, active, lastMessage, unread, onClick }) {
             </Box>
           }
           secondary={
-            <Typography variant="caption" color="text.disabled" noWrap sx={{ maxWidth: 140, display: 'block', mt: 0.2 }}>
+            <Typography
+              variant="caption"
+              noWrap
+              sx={{
+                maxWidth: 140, display: 'block', mt: 0.2,
+                fontWeight: unread ? 700 : 400,
+                color: unread ? 'text.primary' : 'text.disabled',
+              }}
+            >
               {lastMessage || (contact.online ? 'Online' : (lastSeen ? `Last seen ${lastSeen}` : ''))}
             </Typography>
           }

@@ -35,6 +35,7 @@ export function useChatHandler() {
   const allMessages  = useSelector((s) => s.chat.messages)
   const contacts     = useSelector((s) => s.chat.contacts)
   const rooms        = useSelector((s) => s.chat.rooms)
+  const unreadCounts = useSelector((s) => s.chat.unreadCounts)
 
   const [input,        setInput]        = useState('')
   const [search,       setSearch]       = useState('')
@@ -93,6 +94,7 @@ export function useChatHandler() {
       const onConnect    = () => {
         dispatch(setConnected(true))
         socket.emit('user_online', currentUser.id)
+        socket.emit('get_online_users')
       }
       const onDisconnect = () => dispatch(setConnected(false))
       const onOnline     = (ids) => dispatch(setOnlineUsers(ids))
@@ -143,7 +145,7 @@ export function useChatHandler() {
 
     if (socket) {
       const onNewMessage = (message) => {
-        if (message.roomId === activeRoomId) {
+        if (message.roomId === activeRoomId && message.senderId !== currentUser?.id) {
           dispatch(receiveMessage({
             roomId: activeRoomId,
             message: {
@@ -253,6 +255,16 @@ export function useChatHandler() {
     return room.lastMessagePreview || null
   }, [rooms, currentUser?.id])
 
+  const getUnreadCount = useCallback((contactId) => {
+    const room = rooms.find(
+      (r) => !r.isGroup &&
+        r.members?.some((m) => m.userId === contactId) &&
+        r.members?.some((m) => m.userId === currentUser?.id)
+    )
+    if (!room) return 0
+    return unreadCounts[room.id] || 0
+  }, [rooms, unreadCounts, currentUser?.id])
+
   const openGroupDialog = useCallback(() => {
     setGroupName(''); setGroupMemberIds([]); setGroupError(''); setGroupDialogOpen(true)
   }, [])
@@ -285,9 +297,10 @@ export function useChatHandler() {
     contacts, rooms, filteredContacts, messagesEndRef, currentUser,
     selectedFile, fileInputRef, uploading,
     groupDialogOpen, groupName, groupMemberIds, groupCreating, groupError,
+    unreadCounts,
     setInput, setSearch, setShowPanel, setGroupName,
     handleSend, handleKeyDown, handleSelectContact, handleSelectRoom,
-    getLastMessage, handleFileChange, handleRemoveFile,
+    getLastMessage, getUnreadCount, handleFileChange, handleRemoveFile,
     openGroupDialog, closeGroupDialog, toggleGroupMember, handleCreateGroup,
   }
 }
