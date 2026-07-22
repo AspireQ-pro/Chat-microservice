@@ -87,7 +87,6 @@ export function useChatHandler() {
   useEffect(() => {
     if (!currentUser?.id || !authToken) return
 
-    // Connect socket with auth token
     const socket = authToken !== 'dev-mock-token' ? connectSocket(authToken) : null
 
     if (socket) {
@@ -98,20 +97,41 @@ export function useChatHandler() {
       }
       const onDisconnect = () => dispatch(setConnected(false))
       const onOnline     = (ids) => dispatch(setOnlineUsers(ids))
+      const onNewMessage = (message) => {
+        if (message.senderId === currentUser.id) return
+        dispatch(receiveMessage({
+          roomId: message.roomId,
+          message: {
+            id:         message.id,
+            senderId:   message.senderId,
+            senderName: message.sender?.name || '',
+            text:       message.content  || '',
+            fileUrl:    message.fileUrl  || null,
+            fileType:   message.fileType || null,
+            time:       new Date(message.createdAt).toLocaleTimeString([], {
+              hour: '2-digit', minute: '2-digit',
+            }),
+            mine: false,
+          },
+        }))
+      }
 
       socket.on('connect',      onConnect)
       socket.on('disconnect',   onDisconnect)
       socket.on('online_users', onOnline)
+      socket.on('new_message',  onNewMessage)
 
       if (socket.connected) {
         dispatch(setConnected(true))
         socket.emit('user_online', currentUser.id)
+        socket.emit('get_online_users')
       }
 
       return () => {
         socket.off('connect',      onConnect)
         socket.off('disconnect',   onDisconnect)
         socket.off('online_users', onOnline)
+        socket.off('new_message',  onNewMessage)
       }
     }
   }, [dispatch, currentUser?.id, authToken])
@@ -136,38 +156,11 @@ export function useChatHandler() {
   // Join room + fetch history + mark as read when active room changes
   useEffect(() => {
     if (!activeRoomId) return
-
     const socket = getSocket()
     if (socket) socket.emit('join_room', activeRoomId)
-
     dispatch(fetchMessages(activeRoomId))
     if (currentUser?.id) dispatch(markMessagesRead({ roomId: activeRoomId, userId: currentUser.id }))
-
-    if (socket) {
-      const onNewMessage = (message) => {
-        if (message.roomId === activeRoomId && message.senderId !== currentUser?.id) {
-          dispatch(receiveMessage({
-            roomId: activeRoomId,
-            message: {
-              id:         message.id,
-              senderId:   message.senderId,
-              senderName: message.sender?.name || '',
-              text:       message.content  || '',
-              fileUrl:    message.fileUrl  || null,
-              fileType:   message.fileType || null,
-              time:       new Date(message.createdAt).toLocaleTimeString([], {
-                hour: '2-digit', minute: '2-digit',
-              }),
-              mine: false,
-            },
-          }))
-        }
-      }
-
-      socket.on('new_message', onNewMessage)
-      return () => socket.off('new_message', onNewMessage)
-    }
-  }, [dispatch, activeRoomId])
+  }, [dispatch, activeRoomId, currentUser?.id])
 
   // Auto-scroll
   useEffect(() => {

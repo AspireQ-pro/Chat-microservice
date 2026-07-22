@@ -391,6 +391,7 @@ io.on("connection", (socket) => {
       });
 
       io.to(roomId).emit("new_message", message);
+      io.to(`project:${socket.projectId}`).emit("new_message", message);
     } catch (err) {
       console.error("Error saving message:", err);
     }
