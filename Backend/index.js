@@ -15,10 +15,42 @@ const server = http.createServer(app);
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-const CHAT_JWT_SECRET = process.env.CHAT_JWT_SECRET || crypto.randomBytes(64).toString("hex");
+const CHAT_JWT_SECRET =
+  process.env.CHAT_JWT_SECRET || crypto.randomBytes(64).toString("hex");
+const BACKEND_URL = (
+  process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`
+).replace(/\/$/, "");
+const corsOrigin = process.env.CORS_ORIGIN || "*";
+const API_BASE = "/api";
+const CHAT_FRONTEND_URL = (
+  process.env.CHAT_FRONTEND_URL ||
+  `http://localhost:${process.env.CHAT_FRONTEND_PORT || 3001}`
+).replace(/\/$/, "");
 
-app.use(cors());
+function sendError(res, status, error, details) {
+  const payload = { error };
+  if (details) payload.details = details;
+  return res.status(status).json(payload);
+}
+
+function asyncHandler(fn) {
+  return function (req, res, next) {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    console.log(
+      `${new Date().toISOString()} ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - start}ms`,
+    );
+  });
+  next();
+});
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const storage = multer.diskStorage({
@@ -37,16 +69,19 @@ function generateApiKey() {
 
 async function resolveProject(req, res, next) {
   const apiKey = req.headers["x-api-key"];
-  if (!apiKey) return res.status(401).json({ error: "X-API-KEY header is required" });
+  if (!apiKey)
+    return res.status(401).json({ error: "X-API-KEY header is required" });
 
   try {
     const project = await prisma.project.findUnique({ where: { apiKey } });
     if (!project) return res.status(401).json({ error: "Invalid API key" });
-    if (!project.isActive) return res.status(403).json({ error: "Project is deactivated" });
+    if (!project.isActive)
+      return res.status(403).json({ error: "Project is deactivated" });
     req.project = project;
     next();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("resolveProject error", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 }
 
@@ -55,7 +90,9 @@ async function resolveProject(req, res, next) {
 function authenticateChatJWT(req, res, next) {
   const header = req.headers["authorization"];
   if (!header || !header.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Authorization header required (Bearer <token>)" });
+    return res
+      .status(401)
+      .json({ error: "Authorization header required (Bearer <token>)" });
   }
   const token = header.slice(7);
   try {
@@ -78,11 +115,12 @@ app.get("/", (req, res) => {
 // 1. REGISTER PROJECT — Admin creates a project and gets an API key
 // ═════════════════════════════════════════════════════════════════════════════
 
-app.post("/api/projects", async (req, res) => {
-  const { name } = req.body;
-  if (!name) return res.status(400).json({ error: "Project name is required" });
+app.post(
+  `${API_BASE}/projects`,
+  asyncHandler(async (req, res) => {
+    const { name } = req.body;
+    if (!name) return sendError(res, 400, "Project name is required");
 
-  try {
     const project = await prisma.project.create({
       data: { name, apiKey: generateApiKey() },
     });
@@ -91,26 +129,34 @@ app.post("/api/projects", async (req, res) => {
       name: project.name,
       apiKey: project.apiKey,
     });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
+  }),
+);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 2. SYNC USER — Project's backend calls this when a user clicks "Chat"
 //    Server-to-server: X-API-KEY identifies the project, body has user details
 // ═════════════════════════════════════════════════════════════════════════════
 
-app.post("/api/users/sync", resolveProject, async (req, res) => {
-  const { id, name, email } = req.body;
-  if (!id || !name) {
-    return res.status(400).json({ error: "id and name are required" });
-  }
+app.post(
+  `${API_BASE}/users/sync`,
+  resolveProject,
+  asyncHandler(async (req, res) => {
+    const { id, name, email } = req.body || {};
+    if (!id || !name) {
+      return sendError(res, 400, "id and name are required");
+    }
 
-  try {
+    const safeEmail =
+      email && String(email).trim()
+        ? String(email).trim()
+        : `${String(id)}@noemail.local`;
+
     let chatUser = await prisma.chatUser.findUnique({
       where: {
-        projectId_externalUserId: { projectId: req.project.id, externalUserId: String(id) },
+        projectId_externalUserId: {
+          projectId: req.project.id,
+          externalUserId: String(id),
+        },
       },
     });
 
@@ -119,19 +165,17 @@ app.post("/api/users/sync", resolveProject, async (req, res) => {
         data: {
           projectId: req.project.id,
           externalUserId: String(id),
-          name,
-          email,
+          name: String(name),
+          email: safeEmail,
         },
       });
     } else {
-      // Update name/email if changed in project's system
       chatUser = await prisma.chatUser.update({
         where: { id: chatUser.id },
-        data: { name, email },
+        data: { name: String(name), email: safeEmail },
       });
     }
 
-    // Generate a short-lived token for the frontend to use
     const chatToken = jwt.sign(
       {
         userId: chatUser.id,
@@ -140,30 +184,34 @@ app.post("/api/users/sync", resolveProject, async (req, res) => {
         email: chatUser.email,
       },
       CHAT_JWT_SECRET,
-      { expiresIn: "24h" }
+      { expiresIn: "24h" },
     );
 
     res.json({
+      success: true,
       token: chatToken,
+      chatUrl: CHAT_FRONTEND_URL,
+      projectId: req.project.id,
       user: { id: chatUser.id, name: chatUser.name, email: chatUser.email },
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  }),
+);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 3. SEARCH USERS — Only within the same project
 // ═════════════════════════════════════════════════════════════════════════════
 
-app.get("/users", authenticateChatJWT, async (req, res) => {
+app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
   const { excludeId, q } = req.query;
   try {
     const where = { projectId: req.projectId };
     if (excludeId) where.id = { not: excludeId };
     if (q) where.name = { contains: q, mode: "insensitive" };
 
-    const users = await prisma.chatUser.findMany({ where, orderBy: { name: "asc" } });
+    const users = await prisma.chatUser.findMany({
+      where,
+      orderBy: { name: "asc" },
+    });
     res.json(users);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -181,7 +229,10 @@ app.get("/users/:userId/rooms", authenticateChatJWT, async (req, res) => {
     const rooms = await prisma.chatRoom.findMany({
       where: { projectId: req.projectId, members: { some: { userId } } },
       include: { members: { include: { user: true } } },
-      orderBy: [{ lastMessageAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
+      orderBy: [
+        { lastMessageAt: { sort: "desc", nulls: "last" } },
+        { createdAt: "desc" },
+      ],
     });
     res.json(rooms);
   } catch (err) {
@@ -190,21 +241,29 @@ app.get("/users/:userId/rooms", authenticateChatJWT, async (req, res) => {
 });
 
 // Create or get direct 1-to-1 room
-app.post("/rooms/direct", authenticateChatJWT, async (req, res) => {
+app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
   const { userId1, userId2 } = req.body;
-  if (!userId1 || !userId2) return res.status(400).json({ error: "Both userId1 and userId2 are required" });
+  if (!userId1 || !userId2)
+    return res
+      .status(400)
+      .json({ error: "Both userId1 and userId2 are required" });
 
   // Both users must be in this project
   const count = await prisma.chatUser.count({
     where: { projectId: req.projectId, id: { in: [userId1, userId2] } },
   });
-  if (count !== 2) return res.status(403).json({ error: "Users must belong to this project" });
+  if (count !== 2)
+    return res.status(403).json({ error: "Users must belong to this project" });
 
   try {
     const existing = await prisma.chatRoom.findFirst({
       where: {
-        projectId: req.projectId, isGroup: false,
-        AND: [{ members: { some: { userId: userId1 } } }, { members: { some: { userId: userId2 } } }],
+        projectId: req.projectId,
+        isGroup: false,
+        AND: [
+          { members: { some: { userId: userId1 } } },
+          { members: { some: { userId: userId2 } } },
+        ],
       },
       include: { members: true },
     });
@@ -212,7 +271,8 @@ app.post("/rooms/direct", authenticateChatJWT, async (req, res) => {
 
     const room = await prisma.chatRoom.create({
       data: {
-        projectId: req.projectId, isGroup: false,
+        projectId: req.projectId,
+        isGroup: false,
         members: { create: [{ userId: userId1 }, { userId: userId2 }] },
       },
       include: { members: true },
@@ -224,10 +284,12 @@ app.post("/rooms/direct", authenticateChatJWT, async (req, res) => {
 });
 
 // Create group room
-app.post("/rooms/group", authenticateChatJWT, async (req, res) => {
+app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
   const { name, creatorId, memberIds } = req.body;
   if (!name || !creatorId || !memberIds?.length) {
-    return res.status(400).json({ error: "name, creatorId, and memberIds are required" });
+    return res
+      .status(400)
+      .json({ error: "name, creatorId, and memberIds are required" });
   }
 
   const allIds = Array.from(new Set([creatorId, ...memberIds]));
@@ -235,13 +297,17 @@ app.post("/rooms/group", authenticateChatJWT, async (req, res) => {
     where: { projectId: req.projectId, id: { in: allIds } },
   });
   if (validCount !== allIds.length) {
-    return res.status(403).json({ error: "All members must belong to this project" });
+    return res
+      .status(403)
+      .json({ error: "All members must belong to this project" });
   }
 
   try {
     const room = await prisma.chatRoom.create({
       data: {
-        projectId: req.projectId, name, isGroup: true,
+        projectId: req.projectId,
+        name,
+        isGroup: true,
         members: { create: allIds.map((userId) => ({ userId })) },
       },
       include: { members: { include: { user: true } } },
@@ -253,7 +319,7 @@ app.post("/rooms/group", authenticateChatJWT, async (req, res) => {
 });
 
 // Get single room
-app.get("/rooms/:roomId", authenticateChatJWT, async (req, res) => {
+app.get(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, async (req, res) => {
   const { roomId } = req.params;
   try {
     const room = await prisma.chatRoom.findFirst({
@@ -268,32 +334,37 @@ app.get("/rooms/:roomId", authenticateChatJWT, async (req, res) => {
 });
 
 // Get room messages
-app.get("/rooms/:roomId/messages", authenticateChatJWT, async (req, res) => {
-  const { roomId } = req.params;
-  try {
-    const room = await prisma.chatRoom.findFirst({
-      where: { id: roomId, projectId: req.projectId },
-    });
-    if (!room) return res.status(404).json({ error: "Room not found" });
+app.get(
+  `${API_BASE}/rooms/:roomId/messages`,
+  authenticateChatJWT,
+  async (req, res) => {
+    const { roomId } = req.params;
+    try {
+      const room = await prisma.chatRoom.findFirst({
+        where: { id: roomId, projectId: req.projectId },
+      });
+      if (!room) return res.status(404).json({ error: "Room not found" });
 
-    const messages = await prisma.message.findMany({
-      where: { roomId },
-      orderBy: { createdAt: "asc" },
-      include: { sender: true },
-    });
-    res.json(messages);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
+      const messages = await prisma.message.findMany({
+        where: { roomId },
+        orderBy: { createdAt: "asc" },
+        include: { sender: true },
+      });
+      res.json(messages);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  },
+);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 5. READ RECEIPTS — Mark messages as read when user opens a room
 // ═════════════════════════════════════════════════════════════════════════════
 
-app.post("/messages/read", authenticateChatJWT, async (req, res) => {
+app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
   const { roomId, userId } = req.body;
-  if (!roomId || !userId) return res.status(400).json({ error: "roomId and userId required" });
+  if (!roomId || !userId)
+    return res.status(400).json({ error: "roomId and userId required" });
 
   try {
     await prisma.message.updateMany({
@@ -310,26 +381,37 @@ app.post("/messages/read", authenticateChatJWT, async (req, res) => {
 // 6. FILE UPLOAD
 // ═════════════════════════════════════════════════════════════════════════════
 
-app.post("/upload", authenticateChatJWT, upload.single("file"), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  const fileUrl = `http://localhost:${process.env.PORT || 5000}/uploads/${req.file.filename}`;
-  const isImage = req.file.mimetype.startsWith("image/");
-  res.json({ fileUrl, fileType: isImage ? "image" : "file" });
+app.post(
+  `${API_BASE}/upload`,
+  authenticateChatJWT,
+  upload.single("file"),
+  (req, res) => {
+    if (!req.file) return sendError(res, 400, "No file uploaded");
+    const fileUrl = `${BACKEND_URL}/uploads/${req.file.filename}`;
+    const isImage = req.file.mimetype.startsWith("image/");
+    res.json({ fileUrl, fileType: isImage ? "image" : "file" });
+  },
+);
+
+app.get(`${API_BASE}/health`, (req, res) => {
+  res.json({ status: "ok", service: "chat" });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 6. SOCKET.IO — Multi-tenant real-time messaging
 // ═════════════════════════════════════════════════════════════════════════════
 
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, { cors: { origin: corsOrigin } });
 const onlineUsers = new Map(); // socketId -> { userId, projectId }
 
 function broadcastOnlineUsers(projectId) {
-  const userIds = [...new Set(
-    [...onlineUsers.values()]
-      .filter((u) => u.projectId === projectId)
-      .map((u) => u.userId)
-  )];
+  const userIds = [
+    ...new Set(
+      [...onlineUsers.values()]
+        .filter((u) => u.projectId === projectId)
+        .map((u) => u.userId),
+    ),
+  ];
   io.to(`project:${projectId}`).emit("online_users", userIds);
 }
 
@@ -352,50 +434,89 @@ io.on("connection", (socket) => {
   socket.on("user_online", (userId) => {
     onlineUsers.set(socket.id, { userId, projectId: socket.projectId });
     broadcastOnlineUsers(socket.projectId);
-    prisma.chatUser.update({ where: { id: userId }, data: { lastSeenAt: new Date() } }).catch(() => {});
+    prisma.chatUser
+      .update({ where: { id: userId }, data: { lastSeenAt: new Date() } })
+      .catch(() => {});
   });
 
   socket.on("get_online_users", () => {
-    const userIds = [...new Set(
-      [...onlineUsers.values()]
-        .filter((u) => u.projectId === socket.projectId)
-        .map((u) => u.userId)
-    )];
+    const userIds = [
+      ...new Set(
+        [...onlineUsers.values()]
+          .filter((u) => u.projectId === socket.projectId)
+          .map((u) => u.userId),
+      ),
+    ];
     socket.emit("online_users", userIds);
   });
 
-  socket.on("join_room", (roomId) => {
+  socket.on("join_room", async (roomId) => {
+    const room = await prisma.chatRoom.findFirst({
+      where: { id: roomId, projectId: socket.projectId },
+    });
+    if (!room)
+      return socket.emit("error", {
+        message: "Room not found or unauthorized",
+      });
     socket.join(roomId);
   });
 
-  socket.on("send_message", async ({ roomId, senderId, content, fileUrl, fileType }) => {
-    try {
-      const room = await prisma.chatRoom.findFirst({
-        where: { id: roomId, projectId: socket.projectId },
-      });
-      if (!room) return socket.emit("error", { message: "Room not found" });
+  socket.on(
+    "send_message",
+    async ({ roomId, senderId, content, fileUrl, fileType }) => {
+      if (!roomId || !senderId || (!content && !fileUrl)) {
+        return socket.emit("error", {
+          message: "roomId, senderId and content or fileUrl are required",
+        });
+      }
+      if (senderId !== socket.userId) {
+        return socket.emit("error", { message: "Sender mismatch" });
+      }
 
-      const messageType = fileUrl ? (fileType === "image" ? "image" : "file") : "text";
-      const preview = fileUrl
-        ? (fileType === "image" ? "📷 Photo" : "📎 File")
-        : (content?.slice(0, 100) || "");
+      try {
+        const room = await prisma.chatRoom.findFirst({
+          where: { id: roomId, projectId: socket.projectId },
+        });
+        if (!room) return socket.emit("error", { message: "Room not found" });
 
-      const message = await prisma.message.create({
-        data: { roomId, senderId, content, fileUrl, fileType, messageType },
-        include: { sender: true },
-      });
+        const sender = await prisma.chatUser.findFirst({
+          where: { id: senderId, projectId: socket.projectId },
+        });
+        if (!sender) {
+          return socket.emit("error", {
+            message: "Sender not found or unauthorized",
+          });
+        }
 
-      await prisma.chatRoom.update({
-        where: { id: roomId },
-        data: { lastMessageAt: new Date(), lastMessagePreview: preview },
-      });
+        const messageType = fileUrl
+          ? fileType === "image"
+            ? "image"
+            : "file"
+          : "text";
+        const preview = fileUrl
+          ? fileType === "image"
+            ? "📷 Photo"
+            : "📎 File"
+          : content?.slice(0, 100) || "";
 
-      io.to(roomId).emit("new_message", message);
-      io.to(`project:${socket.projectId}`).emit("new_message", message);
-    } catch (err) {
-      console.error("Error saving message:", err);
-    }
-  });
+        const message = await prisma.message.create({
+          data: { roomId, senderId, content, fileUrl, fileType, messageType },
+          include: { sender: true },
+        });
+
+        await prisma.chatRoom.update({
+          where: { id: roomId },
+          data: { lastMessageAt: new Date(), lastMessagePreview: preview },
+        });
+
+        io.to(roomId).emit("new_message", message);
+        io.to(`project:${socket.projectId}`).emit("new_message", message);
+      } catch (err) {
+        console.error("Error saving message:", err);
+        socket.emit("error", { message: "Unable to save message" });
+      }
+    },
+  );
 
   socket.on("disconnect", () => {
     onlineUsers.delete(socket.id);
@@ -406,6 +527,28 @@ io.on("connection", (socket) => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const PORT = process.env.PORT || 5000;
+server.keepAliveTimeout = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 5000);
+server.headersTimeout = Number(
+  process.env.HEADERS_TIMEOUT_MS || server.keepAliveTimeout + 1000,
+);
+
+app.use((req, res) => {
+  sendError(res, 404, "Resource not found");
+});
+
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  if (res.headersSent) return next(err);
+  sendError(res, 500, "Internal server error");
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("uncaughtException", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("unhandledRejection", reason);
+});
+
 server.listen(PORT, () => {
   console.log(`Chat service running on port ${PORT}`);
 });
