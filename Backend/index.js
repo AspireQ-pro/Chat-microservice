@@ -223,7 +223,7 @@ app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 // List rooms for a user
-app.get("/users/:userId/rooms", authenticateChatJWT, async (req, res) => {
+app.get(`${API_BASE}/users/:userId/rooms`, authenticateChatJWT, async (req, res) => {
   const { userId } = req.params;
   try {
     const rooms = await prisma.chatRoom.findMany({
