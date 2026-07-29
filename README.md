@@ -551,7 +551,7 @@ npm run preview
 ## Current Known Issues
 
 - Prisma migrations appear to be older than the current Prisma schema. Fresh deployments should be checked carefully.
-- `docker-compose.yml` currently uses `JWT_SECRET`, but the backend expects `CHAT_JWT_SECRET`.
+- `docker-compose.yml` uses `CHAT_JWT_SECRET`, matching the backend.
 - Frontend upload requests should include the bearer token because `/upload` is authenticated.
 - Several backend routes and socket events trust user IDs supplied by the client. They should use the authenticated JWT user ID instead.
 - Socket room joins and message sends should verify room membership.
