@@ -23,6 +23,7 @@ model ChatUser {
   externalUserId String
   name           String
   email          String?
+  role           String?
   avatarUrl      String?
   lastSeenAt     DateTime?
   createdAt      DateTime @default(now())

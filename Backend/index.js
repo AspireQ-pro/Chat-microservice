@@ -141,7 +141,7 @@ app.post(
   `${API_BASE}/users/sync`,
   resolveProject,
   asyncHandler(async (req, res) => {
-    const { id, name, email } = req.body || {};
+    const { id, name, email, role } = req.body || {};
     if (!id || !name) {
       return sendError(res, 400, "id and name are required");
     }
@@ -150,6 +150,8 @@ app.post(
       email && String(email).trim()
         ? String(email).trim()
         : `${String(id)}@noemail.local`;
+    const safeRole =
+      role && String(role).trim() ? String(role).trim() : null;
 
     let chatUser = await prisma.chatUser.findUnique({
       where: {
@@ -167,12 +169,13 @@ app.post(
           externalUserId: String(id),
           name: String(name),
           email: safeEmail,
+          role: safeRole,
         },
       });
     } else {
       chatUser = await prisma.chatUser.update({
         where: { id: chatUser.id },
-        data: { name: String(name), email: safeEmail },
+        data: { name: String(name), email: safeEmail, role: safeRole },
       });
     }
 
