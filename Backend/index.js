@@ -5,8 +5,6 @@ const cors = require("cors");
 const { Server } = require("socket.io");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
-const multer = require("multer");
-const path = require("path");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 
@@ -51,13 +49,6 @@ app.use((req, res, next) => {
   });
   next();
 });
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, "uploads")),
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
-});
-const upload = multer({ storage });
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -197,6 +188,64 @@ app.post(
       projectId: req.project.id,
       user: { id: chatUser.id, name: chatUser.name, email: chatUser.email },
     });
+  }),
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 2b. BULK SYNC USERS — Project's backend pushes its whole member list so every
+//     member appears in chat immediately (not only after they open chat).
+//     Server-to-server: X-API-KEY identifies the project.
+// ═════════════════════════════════════════════════════════════════════════════
+
+app.post(
+  `${API_BASE}/users/bulk-sync`,
+  resolveProject,
+  asyncHandler(async (req, res) => {
+    const users = Array.isArray(req.body?.users) ? req.body.users : [];
+    if (users.length === 0) {
+      return sendError(res, 400, "users array is required");
+    }
+
+    let synced = 0;
+    const errors = [];
+
+    for (const u of users) {
+      const id = u?.id;
+      const name = u?.name;
+      if (!id || !name) {
+        errors.push({ id: id ?? null, error: "id and name are required" });
+        continue;
+      }
+      const safeEmail =
+        u.email && String(u.email).trim()
+          ? String(u.email).trim()
+          : `${String(id)}@noemail.local`;
+      const safeRole = u.role && String(u.role).trim() ? String(u.role).trim() : null;
+
+      try {
+        await prisma.chatUser.upsert({
+          where: {
+            projectId_externalUserId: {
+              projectId: req.project.id,
+              externalUserId: String(id),
+            },
+          },
+          update: { name: String(name), email: safeEmail, role: safeRole },
+          create: {
+            projectId: req.project.id,
+            externalUserId: String(id),
+            name: String(name),
+            email: safeEmail,
+            role: safeRole,
+          },
+        });
+        synced++;
+      } catch (err) {
+        errors.push({ id: String(id), error: err.message });
+      }
+    }
+
+    res.json({ success: true, synced, total: users.length, errors });
   }),
 );
 
@@ -345,25 +394,60 @@ app.get(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, async (req, res) => {
   }
 });
 
-// Get room messages
+// Get room messages (paginated, WhatsApp-style)
+//
+// Query params:
+//   limit  - page size (default 30, max 100)
+//   before - ISO timestamp; return messages OLDER than this (for "load previous")
+//
+// Returns: { messages: [...oldest→newest], hasMore, nextBefore }
+//   - messages are ordered oldest→newest so the client can append directly
+//   - hasMore indicates whether older messages exist beyond this page
+//   - nextBefore is the cursor to pass as `before` to fetch the previous page
 app.get(
   `${API_BASE}/rooms/:roomId/messages`,
   authenticateChatJWT,
   async (req, res) => {
     const { roomId } = req.params;
+    const rawLimit = parseInt(req.query.limit, 10);
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 30, 1), 100);
+    const before = req.query.before ? new Date(req.query.before) : null;
+
     try {
       const room = await prisma.chatRoom.findFirst({
         where: { id: roomId, projectId: req.projectId },
       });
       if (!room) return res.status(404).json({ error: "Room not found" });
 
-      const messages = await prisma.message.findMany({
-        where: { roomId },
-        orderBy: { createdAt: "asc" },
+      // Caller must be a member of the room.
+      const membership = await prisma.chatRoomMember.findUnique({
+        where: { roomId_userId: { roomId, userId: req.userId } },
+      });
+      if (!membership)
+        return res.status(403).json({ error: "Not a member of this room" });
+
+      const where = { roomId };
+      if (before && !isNaN(before.getTime())) {
+        where.createdAt = { lt: before };
+      }
+
+      // Fetch newest-first, one extra row to detect if more exist.
+      const rows = await prisma.message.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit + 1,
         include: { sender: true },
       });
-      res.json(messages);
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      // Reverse to oldest→newest for display.
+      const messages = page.reverse();
+      const nextBefore = messages.length ? messages[0].createdAt : null;
+
+      res.json({ messages, hasMore, nextBefore });
     } catch (err) {
+      console.error("rooms/messages error", err);
       res.status(400).json({ error: err.message });
     }
   },
@@ -388,22 +472,6 @@ app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
-
-// ═════════════════════════════════════════════════════════════════════════════
-// 6. FILE UPLOAD
-// ═════════════════════════════════════════════════════════════════════════════
-
-app.post(
-  `${API_BASE}/upload`,
-  authenticateChatJWT,
-  upload.single("file"),
-  (req, res) => {
-    if (!req.file) return sendError(res, 400, "No file uploaded");
-    const fileUrl = `${BACKEND_URL}/uploads/${req.file.filename}`;
-    const isImage = req.file.mimetype.startsWith("image/");
-    res.json({ fileUrl, fileType: isImage ? "image" : "file" });
-  },
-);
 
 app.get(`${API_BASE}/health`, (req, res) => {
   res.json({ status: "ok", service: "chat" });
@@ -441,10 +509,37 @@ io.use((socket, next) => {
 });
 
 io.on("connection", (socket) => {
+  // Join project + personal channels. Runs on every (re)connect, so a client
+  // that drops and reconnects is automatically back in its channels.
   socket.join(`project:${socket.projectId}`);
+  socket.join(`user:${socket.userId}`);
+
+  // Auto re-join every room the user belongs to, so reconnected clients keep
+  // receiving realtime messages without having to re-open each chat.
+  (async () => {
+    try {
+      const memberships = await prisma.chatRoomMember.findMany({
+        where: { userId: socket.userId, room: { projectId: socket.projectId } },
+        select: { roomId: true },
+      });
+      for (const m of memberships) socket.join(m.roomId);
+    } catch (err) {
+      console.error("auto re-join rooms error", err);
+    }
+  })();
+
+  // Mark online immediately on connect (no separate client emit required).
+  onlineUsers.set(socket.id, {
+    userId: socket.userId,
+    projectId: socket.projectId,
+  });
+  broadcastOnlineUsers(socket.projectId);
+  prisma.chatUser
+    .update({ where: { id: socket.userId }, data: { lastSeenAt: new Date() } })
+    .catch(() => {});
 
   socket.on("user_online", () => {
-    // Trust the authenticated JWT user, not a client-supplied id.
+    // Kept for backwards compatibility; presence is already set on connect.
     const userId = socket.userId;
     onlineUsers.set(socket.id, { userId, projectId: socket.projectId });
     broadcastOnlineUsers(socket.projectId);
@@ -522,8 +617,27 @@ io.on("connection", (socket) => {
           data: { lastMessageAt: new Date(), lastMessagePreview: preview },
         });
 
+        // Make sure the sender's socket is in the room so they get the echo too.
+        socket.join(roomId);
+
+        // Emit ONCE to the room channel. Everyone who has joined this room
+        // (direct or group) receives it exactly once — no duplicate project-wide
+        // emit. We also notify each member's personal channel so their room list
+        // updates even if they haven't opened the room yet.
         io.to(roomId).emit("new_message", message);
-        io.to(`project:${socket.projectId}`).emit("new_message", message);
+
+        const members = await prisma.chatRoomMember.findMany({
+          where: { roomId },
+          select: { userId: true },
+        });
+        for (const m of members) {
+          io.to(`user:${m.userId}`).emit("room_updated", {
+            roomId,
+            lastMessageAt: message.createdAt,
+            lastMessagePreview: preview,
+            message,
+          });
+        }
       } catch (err) {
         console.error("Error saving message:", err);
         socket.emit("error", { message: "Unable to save message" });
