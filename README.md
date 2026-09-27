@@ -89,29 +89,60 @@ Chat-microservice/
 9. REST APIs load users, rooms, and messages.
 10. Socket.IO handles online status and new messages in real time.
 
+### Society Header Chat Notifications
+
+The chat frontend publishes `chat:notification-count` updates to its opener (or
+parent frame) whenever unread messages or pending message requests change. The
+payload contains `unreadMessages`, `pendingRequests`, and `total`. The society
+application should listen for this event and use `total` for the chat portion
+of its existing notification badge. Since the society header is in the parent
+application, its listener must be added there; that app is not part of this
+repository.
+
+Set the optional frontend variable `VITE_SOCIETY_ORIGIN` to the society
+application's origin to restrict outgoing messages to that origin. The chat
+frontend otherwise uses the document referrer origin, with `*` as a fallback.
+The society listener must still validate `event.origin` against the deployed
+chat frontend origin.
+
+Example listener for the society application:
+
+```js
+const CHAT_FRONTEND_ORIGIN = "https://chat.example.com";
+
+window.addEventListener("message", (event) => {
+  if (event.origin !== CHAT_FRONTEND_ORIGIN) return;
+  if (event.data?.source !== "chat-microservice") return;
+  if (event.data?.type !== "chat:notification-count") return;
+
+  setChatUnreadCount(event.data.total);
+});
+```
+
 ## Environment Variables
 
 ### Backend
 
-| Variable | Purpose | Example |
-| --- | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string used by Prisma | `postgresql://postgres:password@localhost:5433/chat_service` |
-| `CHAT_JWT_SECRET` | Secret used to sign and verify chat JWT tokens | `replace-with-a-long-random-secret` |
-| `PORT` | Backend server port | `5000` |
-| `BACKEND_URL` | Public backend URL used for upload links | `http://localhost:5000` |
+| Variable          | Purpose                                        | Example                                                      |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| `DATABASE_URL`    | PostgreSQL connection string used by Prisma    | `postgresql://postgres:password@localhost:5433/chat_service` |
+| `CHAT_JWT_SECRET` | Secret used to sign and verify chat JWT tokens | `replace-with-a-long-random-secret`                          |
+| `PORT`            | Backend server port                            | `5000`                                                       |
+| `BACKEND_URL`     | Public backend URL used for upload links       | `http://localhost:5000`                                      |
 
 Important: the backend code currently reads `CHAT_JWT_SECRET`. Make sure Docker and local env files use that exact variable name.
 
 ### Frontend
 
-| Variable | Purpose | Example |
-| --- | --- | --- |
-| `VITE_API_URL` | Backend REST API base URL | `http://localhost:5000` |
-| `VITE_SOCKET_URL` | Socket.IO backend URL | `http://localhost:5000` |
-| `VITE_ALLOW_DEV_LOGIN` | Enables mock login in development | `true` |
-| `VITE_DEV_USER_ID` | Mock user ID for local development | `dev-user-001` |
-| `VITE_DEV_USER_NAME` | Mock user name for local development | `Dev User` |
-| `VITE_DEV_USER_EMAIL` | Mock user email for local development | `dev@example.com` |
+| Variable               | Purpose                                                                  | Example                       |
+| ---------------------- | ------------------------------------------------------------------------ | ----------------------------- |
+| `VITE_API_URL`         | Backend REST API base URL                                                | `http://localhost:5000`       |
+| `VITE_SOCKET_URL`      | Socket.IO backend URL                                                    | `http://localhost:5000`       |
+| `VITE_SOCIETY_ORIGIN`  | Optional allowed origin for chat notification messages to the parent app | `https://society.example.com` |
+| `VITE_ALLOW_DEV_LOGIN` | Enables mock login in development                                        | `true`                        |
+| `VITE_DEV_USER_ID`     | Mock user ID for local development                                       | `dev-user-001`                |
+| `VITE_DEV_USER_NAME`   | Mock user name for local development                                     | `Dev User`                    |
+| `VITE_DEV_USER_EMAIL`  | Mock user email for local development                                    | `dev@example.com`             |
 
 ## Running With Docker Compose
 
@@ -389,27 +420,27 @@ The client connects with the JWT token:
 ```js
 io("http://localhost:5000", {
   auth: {
-    token: "jwt-chat-token"
-  }
-})
+    token: "jwt-chat-token",
+  },
+});
 ```
 
 ### Client To Server
 
-| Event | Payload | Purpose |
-| --- | --- | --- |
-| `user_online` | `userId` | Marks a user as online and updates `lastSeenAt`. |
-| `get_online_users` | none | Requests online users for the project. |
-| `join_room` | `roomId` | Joins a Socket.IO room. |
-| `send_message` | `{ roomId, senderId, content, fileUrl, fileType }` | Sends a text, image, or file message. |
+| Event              | Payload                                            | Purpose                                          |
+| ------------------ | -------------------------------------------------- | ------------------------------------------------ |
+| `user_online`      | `userId`                                           | Marks a user as online and updates `lastSeenAt`. |
+| `get_online_users` | none                                               | Requests online users for the project.           |
+| `join_room`        | `roomId`                                           | Joins a Socket.IO room.                          |
+| `send_message`     | `{ roomId, senderId, content, fileUrl, fileType }` | Sends a text, image, or file message.            |
 
 ### Server To Client
 
-| Event | Payload | Purpose |
-| --- | --- | --- |
-| `online_users` | `string[]` | List of online user IDs for the project. |
-| `new_message` | message object | Broadcasts a newly created message. |
-| `error` | `{ message }` | Emits socket-level errors. |
+| Event          | Payload        | Purpose                                  |
+| -------------- | -------------- | ---------------------------------------- |
+| `online_users` | `string[]`     | List of online user IDs for the project. |
+| `new_message`  | message object | Broadcasts a newly created message.      |
+| `error`        | `{ message }`  | Emits socket-level errors.               |
 
 ## Database Models
 
@@ -506,10 +537,10 @@ Fields include:
 
 ## Frontend Routes
 
-| Route | Purpose |
-| --- | --- |
-| `/` | Main chat page. Requires a chat token unless development mock login is enabled. |
-| `/register` | Project registration page. |
+| Route       | Purpose                                                                         |
+| ----------- | ------------------------------------------------------------------------------- |
+| `/`         | Main chat page. Requires a chat token unless development mock login is enabled. |
+| `/register` | Project registration page.                                                      |
 
 ## Parent App Integration Example
 

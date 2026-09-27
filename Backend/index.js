@@ -620,6 +620,49 @@ app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
   }
 });
 
+// Notification badge count for the authenticated user's society header.
+// Pending requests count once as actionable requests; accepted/group rooms
+// contribute their unread-message count.
+app.get(
+  `${API_BASE}/notifications/unread-count`,
+  authenticateChatJWT,
+  async (req, res) => {
+    const userId = req.userId;
+    try {
+      const [unreadMessages, pendingRequests] = await Promise.all([
+        prisma.message.count({
+          where: {
+            senderId: { not: userId },
+            isRead: false,
+            room: {
+              projectId: req.projectId,
+              directStatus: "accepted",
+              members: { some: { userId } },
+            },
+          },
+        }),
+        prisma.chatRoom.count({
+          where: {
+            projectId: req.projectId,
+            isGroup: false,
+            directStatus: "pending",
+            requestedById: { not: userId },
+            members: { some: { userId } },
+          },
+        }),
+      ]);
+      res.json({
+        unreadMessages,
+        pendingRequests,
+        total: unreadMessages + pendingRequests,
+      });
+    } catch (err) {
+      console.error("notifications/unread-count error", err);
+      res.status(400).json({ error: err.message });
+    }
+  },
+);
+
 app.get(`${API_BASE}/health`, (req, res) => {
   res.json({ status: "ok", service: "chat" });
 });

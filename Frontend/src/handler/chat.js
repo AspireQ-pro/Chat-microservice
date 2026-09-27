@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useTheme, useMediaQuery } from "@mui/material";
 import getSocket, { connectSocket } from "@/services/socket";
+import { publishChatNotificationSummary } from "@/services/notifications";
 import {
   setActiveRoom,
   appendMessage,
@@ -18,6 +19,7 @@ import {
   userOffline,
   fetchUsers,
   fetchMyRooms,
+  fetchChatNotificationSummary,
   openDirectRoom,
   acceptDirectRequest,
   fetchMessages,
@@ -71,11 +73,20 @@ export function useChatHandler() {
   const contacts = useSelector((s) => s.chat.contacts);
   const rooms = useSelector((s) => s.chat.rooms);
   const unreadCounts = useSelector((s) => s.chat.unreadCounts);
+  const notificationSummary = useSelector((s) => s.chat.notificationSummary);
   const pagination = useSelector((s) => s.chat.pagination);
   const outbox = useSelector((s) => s.chat.outbox);
   const lastSeen = useSelector((s) => s.chat.lastSeen);
 
   const chatUserId = authToken ? decodeChatUserId(authToken) : null;
+
+  useEffect(() => {
+    publishChatNotificationSummary(notificationSummary);
+  }, [
+    notificationSummary.total,
+    notificationSummary.unreadMessages,
+    notificationSummary.pendingRequests,
+  ]);
 
   const [input, setInput] = useState("");
   const [search, setSearch] = useState("");
@@ -145,6 +156,7 @@ export function useChatHandler() {
       authToken !== "dev-mock-token" ? connectSocket(authToken) : null;
     dispatch(fetchUsers({}));
     dispatch(fetchMyRooms());
+    dispatch(fetchChatNotificationSummary());
 
     if (!socket) return;
 
@@ -154,6 +166,7 @@ export function useChatHandler() {
       dispatch(setConnected(true));
       socket.emit("get_online_users");
       dispatch(fetchMyRooms());
+      dispatch(fetchChatNotificationSummary());
       const openRoom = activeRoomIdRef.current;
       if (openRoom) {
         socket.emit("join_room", openRoom);
@@ -179,6 +192,7 @@ export function useChatHandler() {
       dispatch(
         receiveMessage({ roomId: rid, message, currentUserId: myChatId }),
       );
+      dispatch(fetchChatNotificationSummary());
       if (mine) return;
       socket.emit("message_delivered", { roomId: rid });
       if (activeRoomIdRef.current === rid)
@@ -194,10 +208,16 @@ export function useChatHandler() {
         dispatch(messageFailed({ clientId: p.clientId }));
     };
     const onDelivered = (p) => dispatch(messagesDelivered(p || {}));
-    const onRead = (p) => dispatch(messagesRead(p || {}));
+    const onRead = (p) => {
+      dispatch(messagesRead(p || {}));
+      dispatch(fetchChatNotificationSummary());
+    };
     const onRoomUpd = (p) => {
       dispatch(roomUpdated(p || {}));
-      if (p?.roomId) dispatch(fetchMyRooms());
+      if (p?.roomId) {
+        dispatch(fetchMyRooms());
+        dispatch(fetchChatNotificationSummary());
+      }
     };
 
     socket.on("connect", onConnect);

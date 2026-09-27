@@ -106,6 +106,21 @@ export const fetchMyRooms = createAsyncThunk(
   },
 );
 
+export const fetchChatNotificationSummary = createAsyncThunk(
+  "chat/fetchChatNotificationSummary",
+  async (_, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/notifications/unread-count`, {
+        headers: authHeaders(getState),
+      });
+      if (!res.ok) throw new Error("Failed to fetch chat notification count");
+      return await res.json();
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 export const openDirectRoom = createAsyncThunk(
   "chat/openDirectRoom",
   async ({ userId2 }, { getState, rejectWithValue }) => {
@@ -251,6 +266,7 @@ const chatSlice = createSlice({
     messages: {},
     pagination: {},
     unreadCounts: {},
+    notificationSummary: { unreadMessages: 0, pendingRequests: 0, total: 0 },
     outbox: loadOutbox(),
     lastSeen: {},
     loading: false,
@@ -411,6 +427,11 @@ const chatSlice = createSlice({
       state.messages = {};
       state.pagination = {};
       state.unreadCounts = {};
+      state.notificationSummary = {
+        unreadMessages: 0,
+        pendingRequests: 0,
+        total: 0,
+      };
       state.outbox = [];
       persistOutbox([]);
       state.connected = false;
@@ -454,6 +475,17 @@ const chatSlice = createSlice({
         return bt - at;
       });
     });
+
+    builder.addCase(
+      fetchChatNotificationSummary.fulfilled,
+      (state, { payload }) => {
+        state.notificationSummary = {
+          unreadMessages: payload.unreadMessages || 0,
+          pendingRequests: payload.pendingRequests || 0,
+          total: payload.total || 0,
+        };
+      },
+    );
 
     builder.addCase(openDirectRoom.fulfilled, (state, { payload }) => {
       state.activeRoomId = payload.id;
