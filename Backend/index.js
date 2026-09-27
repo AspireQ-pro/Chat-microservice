@@ -245,20 +245,28 @@ app.get(`${API_BASE}/users/:userId/rooms`, authenticateChatJWT, async (req, res)
 
 // Create or get direct 1-to-1 room
 app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
-  const { userId1, userId2 } = req.body;
+  // The current user is the authenticated JWT user, not a client-supplied id.
+  const userId1 = req.userId;
+  // Accept the other party from either field name for backwards compatibility.
+  const userId2 = req.body?.userId2 || req.body?.otherUserId || req.body?.userId1;
+
   if (!userId1 || !userId2)
+    return res.status(400).json({ error: "userId2 (other user) is required" });
+  if (userId1 === userId2)
     return res
       .status(400)
-      .json({ error: "Both userId1 and userId2 are required" });
-
-  // Both users must be in this project
-  const count = await prisma.chatUser.count({
-    where: { projectId: req.projectId, id: { in: [userId1, userId2] } },
-  });
-  if (count !== 2)
-    return res.status(403).json({ error: "Users must belong to this project" });
+      .json({ error: "Cannot open a direct room with yourself" });
 
   try {
+    // Both users must belong to this project
+    const count = await prisma.chatUser.count({
+      where: { projectId: req.projectId, id: { in: [userId1, userId2] } },
+    });
+    if (count !== 2)
+      return res
+        .status(403)
+        .json({ error: "Users must belong to this project" });
+
     const existing = await prisma.chatRoom.findFirst({
       where: {
         projectId: req.projectId,
@@ -268,7 +276,7 @@ app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
           { members: { some: { userId: userId2 } } },
         ],
       },
-      include: { members: true },
+      include: { members: { include: { user: true } } },
     });
     if (existing) return res.json(existing);
 
@@ -278,10 +286,11 @@ app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
         isGroup: false,
         members: { create: [{ userId: userId1 }, { userId: userId2 }] },
       },
-      include: { members: true },
+      include: { members: { include: { user: true } } },
     });
     res.json(room);
   } catch (err) {
+    console.error("rooms/direct error", err);
     res.status(400).json({ error: err.message });
   }
 });
@@ -434,7 +443,9 @@ io.use((socket, next) => {
 io.on("connection", (socket) => {
   socket.join(`project:${socket.projectId}`);
 
-  socket.on("user_online", (userId) => {
+  socket.on("user_online", () => {
+    // Trust the authenticated JWT user, not a client-supplied id.
+    const userId = socket.userId;
     onlineUsers.set(socket.id, { userId, projectId: socket.projectId });
     broadcastOnlineUsers(socket.projectId);
     prisma.chatUser
@@ -466,14 +477,13 @@ io.on("connection", (socket) => {
 
   socket.on(
     "send_message",
-    async ({ roomId, senderId, content, fileUrl, fileType }) => {
-      if (!roomId || !senderId || (!content && !fileUrl)) {
+    async ({ roomId, content, fileUrl, fileType }) => {
+      // The sender is always the authenticated JWT user (never client-supplied).
+      const senderId = socket.userId;
+      if (!roomId || (!content && !fileUrl)) {
         return socket.emit("error", {
-          message: "roomId, senderId and content or fileUrl are required",
+          message: "roomId and content or fileUrl are required",
         });
-      }
-      if (senderId !== socket.userId) {
-        return socket.emit("error", { message: "Sender mismatch" });
       }
 
       try {
