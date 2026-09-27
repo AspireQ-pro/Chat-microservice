@@ -4,19 +4,26 @@ import { useTheme, useMediaQuery } from '@mui/material'
 import getSocket, { connectSocket } from '@/services/socket'
 import {
   setActiveRoom,
-  receiveMessage,
   appendMessage,
+  queueOutbox,
+  messageSaved,
+  messageFailed,
+  retryingMessage,
+  receiveMessage,
+  messagesDelivered,
+  messagesRead,
+  roomUpdated,
   setConnected,
   setOnlineUsers,
+  userOffline,
   fetchUsers,
   fetchMyRooms,
   openDirectRoom,
   fetchMessages,
+  fetchOlderMessages,
   createGroup,
   markMessagesRead,
 } from '@/provider/chatSlice'
-
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 export const ROLE_COLOR = {
   member:   { bgcolor: '#e3f2fd', color: '#1565c0' },
@@ -24,24 +31,53 @@ export const ROLE_COLOR = {
   admin:    { bgcolor: '#e8f5e9', color: '#2e7d32' },
 }
 
+function decodeChatUserId(token) {
+  try {
+    return JSON.parse(atob(token.split('.')[1]))?.userId || null
+  } catch {
+    return null
+  }
+}
+
+function formatLastSeen(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000)
+  if (diff < 60) return 'last seen just now'
+  if (diff < 3600) return `last seen ${Math.floor(diff / 60)}m ago`
+  const sameDay = d.toDateString() === new Date().toDateString()
+  if (sameDay) return `last seen today ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+  return `last seen ${d.toLocaleDateString()}`
+}
+
+let clientMsgSeq = 0
+function makeClientId() {
+  clientMsgSeq += 1
+  return `c-${Date.now()}-${clientMsgSeq}`
+}
+
 export function useChatHandler() {
   const dispatch  = useDispatch()
   const theme     = useTheme()
   const isMobile  = useMediaQuery(theme.breakpoints.down('md'))
 
-  const currentUser = useSelector((s) => s.auth.user)
-  const authToken   = useSelector((s) => s.auth.token)
+  const currentUser  = useSelector((s) => s.auth.user)
+  const authToken    = useSelector((s) => s.auth.token)
   const activeRoomId = useSelector((s) => s.chat.activeRoomId)
   const allMessages  = useSelector((s) => s.chat.messages)
   const contacts     = useSelector((s) => s.chat.contacts)
   const rooms        = useSelector((s) => s.chat.rooms)
   const unreadCounts = useSelector((s) => s.chat.unreadCounts)
+  const pagination   = useSelector((s) => s.chat.pagination)
+  const outbox       = useSelector((s) => s.chat.outbox)
+  const lastSeen     = useSelector((s) => s.chat.lastSeen)
 
-  const [input,        setInput]        = useState('')
-  const [search,       setSearch]       = useState('')
-  const [showPanel,    setShowPanel]    = useState(true)
-  const [selectedFile, setSelectedFile] = useState(null)
-  const [uploading,    setUploading]    = useState(false)
+  const chatUserId = authToken ? decodeChatUserId(authToken) : null
+
+  const [input,     setInput]     = useState('')
+  const [search,    setSearch]    = useState('')
+  const [showPanel, setShowPanel] = useState(true)
 
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
   const [groupName,       setGroupName]       = useState('')
@@ -49,9 +85,15 @@ export function useChatHandler() {
   const [groupCreating,   setGroupCreating]   = useState(false)
   const [groupError,      setGroupError]      = useState('')
 
-  const searchTimer = useRef(null)
-  const messagesEndRef = useRef(null)
-  const fileInputRef   = useRef(null)
+  const searchTimer          = useRef(null)
+  const messagesEndRef       = useRef(null)
+  const messagesContainerRef = useRef(null)
+  const activeRoomIdRef      = useRef(null)
+  const prevScrollHeightRef  = useRef(0)
+  const outboxRef            = useRef(outbox)
+
+  useEffect(() => { outboxRef.current = outbox }, [outbox])
+  useEffect(() => { activeRoomIdRef.current = activeRoomId }, [activeRoomId])
 
   const activeRoom = rooms.find((r) => r.id === activeRoomId) ?? null
 
@@ -59,179 +101,204 @@ export function useChatHandler() {
     if (!activeRoom) return null
     if (activeRoom.isGroup) {
       return {
-        id:      activeRoom.id,
-        name:    activeRoom.name,
-        avatar:  activeRoom.name?.slice(0, 2).toUpperCase() || 'GR',
-        online:  false,
+        id: activeRoom.id,
+        name: activeRoom.name,
+        avatar: activeRoom.name?.slice(0, 2).toUpperCase() || 'GR',
+        online: false,
         isGroup: true,
       }
     }
-    const partnerMember = activeRoom.members?.find(
-      (m) => m.userId !== currentUser?.id
-    )
+    const partnerMember = activeRoom.members?.find((m) => m.userId !== chatUserId)
     const partner = contacts.find((c) => c.id === partnerMember?.userId)
     return partner ?? null
   })()
 
   const rawMessages = activeRoomId ? (allMessages[activeRoomId] || []) : []
-  const messages = rawMessages.map((m) => ({
-    ...m,
-    mine: m.senderId === currentUser?.id,
-  }))
+  const messages = rawMessages
+  const activePagination = activeRoomId ? pagination[activeRoomId] : null
 
   const filteredContacts = contacts.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase())
+    (c.name || '').toLowerCase().includes(search.toLowerCase())
   )
 
-  // Connect socket and load users/rooms once we have auth
+  const headerStatus = (() => {
+    if (!activeContact) return ''
+    if (activeContact.isGroup) return `${activeRoom?.members?.length ?? 0} members`
+    if (activeContact.online) return 'Online'
+    const seen = lastSeen[activeContact.id] || activeContact.lastSeenAt
+    return formatLastSeen(seen) || 'Offline'
+  })()
+
+  // ── Connect socket + load users/rooms ──
   useEffect(() => {
     if (!currentUser?.id || !authToken) return
-
     const socket = authToken !== 'dev-mock-token' ? connectSocket(authToken) : null
+    dispatch(fetchUsers({}))
+    dispatch(fetchMyRooms())
 
-    if (socket) {
-      const onConnect    = () => {
-        dispatch(setConnected(true))
-        socket.emit('user_online', currentUser.id)
-        socket.emit('get_online_users')
-      }
-      const onDisconnect = () => dispatch(setConnected(false))
-      const onOnline     = (ids) => dispatch(setOnlineUsers(ids))
-      const onNewMessage = (message) => {
-        if (message.senderId === currentUser.id) return
-        dispatch(receiveMessage({
-          roomId: message.roomId,
-          message: {
-            id:         message.id,
-            senderId:   message.senderId,
-            senderName: message.sender?.name || '',
-            text:       message.content  || '',
-            fileUrl:    message.fileUrl  || null,
-            fileType:   message.fileType || null,
-            time:       new Date(message.createdAt).toLocaleTimeString([], {
-              hour: '2-digit', minute: '2-digit',
-            }),
-            mine: false,
-          },
-        }))
-      }
+    if (!socket) return
 
-      socket.on('connect',      onConnect)
-      socket.on('disconnect',   onDisconnect)
-      socket.on('online_users', onOnline)
-      socket.on('new_message',  onNewMessage)
+    const myChatId = decodeChatUserId(authToken)
 
-      if (socket.connected) {
-        dispatch(setConnected(true))
-        socket.emit('user_online', currentUser.id)
-        socket.emit('get_online_users')
+    const onConnect = () => {
+      dispatch(setConnected(true))
+      socket.emit('get_online_users')
+      dispatch(fetchMyRooms())
+      const openRoom = activeRoomIdRef.current
+      if (openRoom) {
+        socket.emit('join_room', openRoom)
+        dispatch(fetchMessages(openRoom))
+        socket.emit('messages_read', { roomId: openRoom })
       }
+      // Flush queued (offline) messages.
+      ;(outboxRef.current || []).forEach((o) => {
+        socket.emit('send_message', { roomId: o.roomId, content: o.text, clientId: o.clientId })
+      })
+    }
+    const onDisconnect = () => dispatch(setConnected(false))
+    const onOnline     = (ids) => dispatch(setOnlineUsers(ids || []))
+    const onOffline    = (p) => dispatch(userOffline(p || {}))
+    const onNewMessage = (message) => {
+      const rid = message?.roomId
+      const mine = myChatId && message?.senderId === myChatId
+      if (mine && !message?.clientId) return
+      dispatch(receiveMessage({ roomId: rid, message, currentUserId: myChatId }))
+      if (mine) return
+      socket.emit('message_delivered', { roomId: rid })
+      if (activeRoomIdRef.current === rid) socket.emit('messages_read', { roomId: rid })
+    }
+    const onAck = (p) => {
+      if (!p) return
+      if (p.status === 'saved') dispatch(messageSaved({ clientId: p.clientId, roomId: p.message?.roomId }))
+      else if (p.status === 'failed') dispatch(messageFailed({ clientId: p.clientId }))
+    }
+    const onDelivered = (p) => dispatch(messagesDelivered(p || {}))
+    const onRead      = (p) => dispatch(messagesRead(p || {}))
+    const onRoomUpd   = (p) => { dispatch(roomUpdated(p || {})); if (p?.roomId) dispatch(fetchMyRooms()) }
 
-      return () => {
-        socket.off('connect',      onConnect)
-        socket.off('disconnect',   onDisconnect)
-        socket.off('online_users', onOnline)
-        socket.off('new_message',  onNewMessage)
-      }
+    socket.on('connect',            onConnect)
+    socket.on('disconnect',         onDisconnect)
+    socket.on('online_users',       onOnline)
+    socket.on('user_offline',       onOffline)
+    socket.on('new_message',        onNewMessage)
+    socket.on('message_ack',        onAck)
+    socket.on('messages_delivered', onDelivered)
+    socket.on('messages_read',      onRead)
+    socket.on('room_updated',       onRoomUpd)
+
+    if (socket.connected) onConnect()
+
+    return () => {
+      socket.off('connect',            onConnect)
+      socket.off('disconnect',         onDisconnect)
+      socket.off('online_users',       onOnline)
+      socket.off('user_offline',       onOffline)
+      socket.off('new_message',        onNewMessage)
+      socket.off('message_ack',        onAck)
+      socket.off('messages_delivered', onDelivered)
+      socket.off('messages_read',      onRead)
+      socket.off('room_updated',       onRoomUpd)
     }
   }, [dispatch, currentUser?.id, authToken])
 
-  // Load users and rooms
-  useEffect(() => {
-    if (!currentUser?.id) return
-    dispatch(fetchUsers({ excludeId: currentUser.id }))
-    dispatch(fetchMyRooms(currentUser.id))
-  }, [dispatch, currentUser?.id])
-
-  // Search with debounce
+  // ── Search with debounce ──
   useEffect(() => {
     if (!currentUser?.id) return
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(() => {
-      dispatch(fetchUsers({ excludeId: currentUser.id, q: search || undefined }))
+      dispatch(fetchUsers({ q: search || undefined }))
     }, 300)
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
   }, [dispatch, search, currentUser?.id])
 
-  // Join room + fetch history + mark as read when active room changes
+  // ── Join room + history + mark read on active room change ──
   useEffect(() => {
     if (!activeRoomId) return
     const socket = getSocket()
-    if (socket) socket.emit('join_room', activeRoomId)
+    if (socket) {
+      socket.emit('join_room', activeRoomId)
+      socket.emit('messages_read', { roomId: activeRoomId })
+    }
     dispatch(fetchMessages(activeRoomId))
-    if (currentUser?.id) dispatch(markMessagesRead({ roomId: activeRoomId, userId: currentUser.id }))
-  }, [dispatch, activeRoomId, currentUser?.id])
+    dispatch(markMessagesRead({ roomId: activeRoomId }))
+  }, [dispatch, activeRoomId])
 
-  // Auto-scroll
+  // ── Auto-scroll (not while loading older) ──
   useEffect(() => {
+    if (activePagination?.loadingOlder) return
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, activePagination?.loadingOlder])
+
+  // ── Preserve scroll after prepending older ──
+  useEffect(() => {
+    const el = messagesContainerRef.current
+    if (!el) return
+    if (prevScrollHeightRef.current) {
+      const diff = el.scrollHeight - prevScrollHeightRef.current
+      if (diff > 0) el.scrollTop = diff
+      prevScrollHeightRef.current = 0
+    }
   }, [messages])
 
-  const handleSend = useCallback(async () => {
-    if (!input.trim() && !selectedFile) return
-    if (!activeRoomId || !currentUser?.id) return
+  const handleMessagesScroll = useCallback((e) => {
+    const el = e.currentTarget
+    if (el.scrollTop > 40) return
+    const p = activeRoomId ? pagination[activeRoomId] : null
+    if (!p || !p.hasMore || p.loadingOlder) return
+    prevScrollHeightRef.current = el.scrollHeight
+    dispatch(fetchOlderMessages(activeRoomId))
+  }, [dispatch, activeRoomId, pagination])
 
-    let fileUrl  = null
-    let fileType = null
-
-    if (selectedFile) {
-      setUploading(true)
-      try {
-        const form = new FormData()
-        form.append('file', selectedFile)
-        const res  = await fetch(`${API}/upload`, { method: 'POST', body: form })
-        const data = await res.json()
-        fileUrl  = data.fileUrl
-        fileType = data.fileType
-      } catch (err) {
-        console.error('Upload failed:', err)
-        setUploading(false)
-        return
-      }
-      setUploading(false)
-    }
-
-    const optimistic = {
-      id:       `optimistic-${Date.now()}`,
-      senderId: currentUser.id,
-      text:     input.trim(),
-      fileUrl,
-      fileType,
-      time:     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      mine:     true,
-    }
-    dispatch(appendMessage({ roomId: activeRoomId, message: optimistic }))
-
+  const handleSend = useCallback(() => {
+    const text = input.trim()
+    if (!text || !activeRoomId) return
+    const clientId = makeClientId()
     const socket = getSocket()
-    if (socket) {
-      socket.emit('send_message', {
-        roomId:   activeRoomId,
-        senderId: currentUser.id,
-        content:  input.trim() || null,
-        fileUrl,
-        fileType,
-      })
+    const online = !!(socket && socket.connected)
+
+    dispatch(appendMessage({
+      roomId: activeRoomId,
+      message: {
+        id: `optimistic-${clientId}`,
+        clientId,
+        roomId: activeRoomId,
+        senderId: chatUserId,
+        senderName: currentUser?.name || '',
+        text,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        createdAt: new Date().toISOString(),
+        mine: true,
+        status: online ? 'sent' : 'sending',
+      },
+    }))
+
+    if (online) {
+      socket.emit('send_message', { roomId: activeRoomId, content: text, clientId })
+    } else {
+      dispatch(queueOutbox({ clientId, roomId: activeRoomId, text }))
     }
-
     setInput('')
-    setSelectedFile(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [dispatch, input, selectedFile, activeRoomId, currentUser?.id])
+  }, [dispatch, input, activeRoomId, chatUserId, currentUser?.name])
 
-  const handleFileChange  = useCallback((e) => setSelectedFile(e.target.files[0] || null), [])
-  const handleRemoveFile  = useCallback(() => {
-    setSelectedFile(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [])
-  const handleKeyDown     = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
+  const handleRetryMessage = useCallback((message) => {
+    if (!message?.clientId) return
+    const socket = getSocket()
+    dispatch(retryingMessage({ clientId: message.clientId }))
+    if (socket && socket.connected) {
+      socket.emit('send_message', { roomId: message.roomId, content: message.text, clientId: message.clientId })
+    } else {
+      dispatch(queueOutbox({ clientId: message.clientId, roomId: message.roomId, text: message.text }))
+    }
+  }, [dispatch])
+
   const handleSelectContact = useCallback(async (contactId) => {
-    if (!currentUser?.id) return
-    await dispatch(openDirectRoom({ userId1: currentUser.id, userId2: contactId }))
+    await dispatch(openDirectRoom({ userId2: contactId }))
     if (isMobile) setShowPanel(false)
-  }, [dispatch, currentUser?.id, isMobile])
+  }, [dispatch, isMobile])
 
   const handleSelectRoom = useCallback((room) => {
     dispatch(setActiveRoom(room))
@@ -242,21 +309,19 @@ export function useChatHandler() {
     const room = rooms.find(
       (r) => !r.isGroup &&
         r.members?.some((m) => m.userId === contactId) &&
-        r.members?.some((m) => m.userId === currentUser?.id)
+        r.members?.some((m) => m.userId === chatUserId)
     )
-    if (!room) return null
-    return room.lastMessagePreview || null
-  }, [rooms, currentUser?.id])
+    return room?.lastMessagePreview || null
+  }, [rooms, chatUserId])
 
   const getUnreadCount = useCallback((contactId) => {
     const room = rooms.find(
       (r) => !r.isGroup &&
         r.members?.some((m) => m.userId === contactId) &&
-        r.members?.some((m) => m.userId === currentUser?.id)
+        r.members?.some((m) => m.userId === chatUserId)
     )
-    if (!room) return 0
-    return unreadCounts[room.id] || 0
-  }, [rooms, unreadCounts, currentUser?.id])
+    return room ? (unreadCounts[room.id] || 0) : 0
+  }, [rooms, unreadCounts, chatUserId])
 
   const openGroupDialog = useCallback(() => {
     setGroupName(''); setGroupMemberIds([]); setGroupError(''); setGroupDialogOpen(true)
@@ -265,16 +330,14 @@ export function useChatHandler() {
     setGroupDialogOpen(false); setGroupName(''); setGroupMemberIds([]); setGroupError('')
   }, [])
   const toggleGroupMember = useCallback((id) => {
-    setGroupMemberIds((prev) =>
-      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
-    )
+    setGroupMemberIds((prev) => prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id])
   }, [])
   const handleCreateGroup = useCallback(async () => {
     if (!groupName.trim()) { setGroupError('Group name is required.'); return }
     if (groupMemberIds.length === 0) { setGroupError('Select at least one member.'); return }
     setGroupCreating(true); setGroupError('')
     try {
-      await dispatch(createGroup({ name: groupName.trim(), creatorId: currentUser.id, memberIds: groupMemberIds }))
+      await dispatch(createGroup({ name: groupName.trim(), memberIds: groupMemberIds }))
       closeGroupDialog()
       if (isMobile) setShowPanel(false)
     } catch {
@@ -282,18 +345,20 @@ export function useChatHandler() {
     } finally {
       setGroupCreating(false)
     }
-  }, [dispatch, groupName, groupMemberIds, currentUser?.id, closeGroupDialog, isMobile])
+  }, [dispatch, groupName, groupMemberIds, closeGroupDialog, isMobile])
 
   return {
     input, search, showPanel, isMobile,
-    activeRoom, activeContact, activeRoomId, messages,
-    contacts, rooms, filteredContacts, messagesEndRef, currentUser,
-    selectedFile, fileInputRef, uploading,
+    activeRoom, activeContact, activeRoomId, headerStatus, messages,
+    contacts, rooms, filteredContacts, messagesEndRef, messagesContainerRef,
+    currentUser, unreadCounts,
+    hasMoreOlder: !!activePagination?.hasMore,
+    loadingOlder: !!activePagination?.loadingOlder,
     groupDialogOpen, groupName, groupMemberIds, groupCreating, groupError,
-    unreadCounts,
     setInput, setSearch, setShowPanel, setGroupName,
-    handleSend, handleKeyDown, handleSelectContact, handleSelectRoom,
-    getLastMessage, getUnreadCount, handleFileChange, handleRemoveFile,
+    handleSend, handleKeyDown, handleRetryMessage, handleMessagesScroll,
+    handleSelectContact, handleSelectRoom,
+    getLastMessage, getUnreadCount,
     openGroupDialog, closeGroupDialog, toggleGroupMember, handleCreateGroup,
   }
 }

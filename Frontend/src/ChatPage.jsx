@@ -9,12 +9,13 @@ import GroupMembersDialog from '@/components/GroupMembersDialog'
 function ChatPage() {
   const {
     input, search, showPanel, isMobile,
-    activeContact, activeRoomId, activeRoom, messages,
-    filteredContacts, contacts, rooms, messagesEndRef,
+    activeContact, activeRoomId, activeRoom, headerStatus, messages,
+    filteredContacts, contacts, rooms, messagesEndRef, messagesContainerRef,
+    hasMoreOlder, loadingOlder,
     setInput, setSearch, setShowPanel, setGroupName,
-    handleSend, handleKeyDown, handleSelectContact,
-    getLastMessage, getUnreadCount, unreadCounts, handleSelectRoom,
-    selectedFile, fileInputRef, uploading, handleFileChange, handleRemoveFile,
+    handleSend, handleKeyDown, handleRetryMessage, handleMessagesScroll,
+    handleSelectContact, handleSelectRoom,
+    getLastMessage, getUnreadCount, unreadCounts,
     groupDialogOpen, groupName, groupMemberIds, groupCreating, groupError,
     openGroupDialog, closeGroupDialog, toggleGroupMember, handleCreateGroup,
   } = useChatHandler()
@@ -44,18 +45,19 @@ function ChatPage() {
       isMobile={isMobile}
       activeContact={activeContact}
       activeRoom={activeRoom}
+      headerStatus={headerStatus}
       messages={messages}
       messagesEndRef={messagesEndRef}
+      messagesContainerRef={messagesContainerRef}
+      hasMoreOlder={hasMoreOlder}
+      loadingOlder={loadingOlder}
+      onMessagesScroll={handleMessagesScroll}
+      onRetryMessage={handleRetryMessage}
       input={input}
       setInput={setInput}
       handleSend={handleSend}
       handleKeyDown={handleKeyDown}
       setShowPanel={setShowPanel}
-      selectedFile={selectedFile}
-      fileInputRef={fileInputRef}
-      uploading={uploading}
-      handleFileChange={handleFileChange}
-      handleRemoveFile={handleRemoveFile}
       onViewMembers={() => setMembersDialogOpen(true)}
     />
   )

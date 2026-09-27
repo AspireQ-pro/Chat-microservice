@@ -552,6 +552,52 @@ app.get(`${API_BASE}/health`, (req, res) => {
   res.json({ status: "ok", service: "chat" });
 });
 
+// ─── Storage verification (JWT-protected) ────────────────────────────────────
+// Confirms messages are persisting. Scoped to the caller's project.
+//   GET /api/stats                 → project-wide totals
+//   GET /api/rooms/:roomId/count   → count for one room + latest message time
+app.get(`${API_BASE}/stats`, authenticateChatJWT, async (req, res) => {
+  try {
+    const [users, rooms, roomIds] = await Promise.all([
+      prisma.chatUser.count({ where: { projectId: req.projectId } }),
+      prisma.chatRoom.count({ where: { projectId: req.projectId } }),
+      prisma.chatRoom.findMany({
+        where: { projectId: req.projectId },
+        select: { id: true },
+      }),
+    ]);
+    const messages = await prisma.message.count({
+      where: { roomId: { in: roomIds.map((r) => r.id) } },
+    });
+    res.json({ projectId: req.projectId, users, rooms, messages });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get(
+  `${API_BASE}/rooms/:roomId/count`,
+  authenticateChatJWT,
+  async (req, res) => {
+    const { roomId } = req.params;
+    try {
+      const room = await prisma.chatRoom.findFirst({
+        where: { id: roomId, projectId: req.projectId },
+      });
+      if (!room) return res.status(404).json({ error: "Room not found" });
+      const count = await prisma.message.count({ where: { roomId } });
+      const latest = await prisma.message.findFirst({
+        where: { roomId },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      res.json({ roomId, count, latestAt: latest?.createdAt || null });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  },
+);
+
 // ═════════════════════════════════════════════════════════════════════════════
 // 6. SOCKET.IO — Multi-tenant real-time messaging
 // ═════════════════════════════════════════════════════════════════════════════
@@ -726,6 +772,14 @@ io.on("connection", (socket) => {
         const outgoing = { ...decryptMessage(created), clientId: clientId || null };
         io.to(roomId).emit("new_message", outgoing);
 
+        // Explicit persistence acknowledgement to the sender, so the client
+        // knows the message was actually saved (not just optimistically shown).
+        socket.emit("message_ack", {
+          clientId: clientId || null,
+          status: "saved",
+          message: outgoing,
+        });
+
         for (const m of members) {
           io.to(`user:${m.userId}`).emit("room_updated", {
             roomId,
@@ -736,6 +790,13 @@ io.on("connection", (socket) => {
         }
       } catch (err) {
         console.error("Error saving message:", err);
+        // Tell the sender the message was NOT saved so it can be retried and
+        // never silently lost.
+        socket.emit("message_ack", {
+          clientId: clientId || null,
+          status: "failed",
+          error: "Unable to save message",
+        });
         socket.emit("error", {
           message: "Unable to save message",
           clientId: clientId || null,
@@ -831,6 +892,33 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("unhandledRejection", reason);
 });
+
+// ─── Encryption key self-check ──────────────────────────────────────────────
+// Verify the encryption key round-trips at boot, and warn loudly if we're on
+// the fallback key (which risks old messages becoming unreadable if the key
+// later changes). This never blocks startup.
+(function verifyEncryptionKey() {
+  try {
+    const probe = "chat-enc-selftest";
+    const roundTrip = decryptContent(encryptContent(probe));
+    if (roundTrip !== probe) {
+      console.error(
+        "[ENCRYPTION] Self-check FAILED: encrypt/decrypt round-trip mismatch. Messages may be unreadable.",
+      );
+    } else {
+      console.log("[ENCRYPTION] Self-check OK (AES-256-GCM at rest).");
+    }
+  } catch (err) {
+    console.error("[ENCRYPTION] Self-check error:", err.message);
+  }
+  if (!process.env.MESSAGE_ENC_KEY) {
+    console.warn(
+      "[ENCRYPTION] MESSAGE_ENC_KEY is not set — using a key derived from CHAT_JWT_SECRET. " +
+        "Set a STABLE MESSAGE_ENC_KEY in production; if this key ever changes, previously " +
+        "encrypted messages will not decrypt.",
+    );
+  }
+})();
 
 server.listen(PORT, () => {
   console.log(`Chat service running on port ${PORT}`);
