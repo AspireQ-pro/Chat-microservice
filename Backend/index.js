@@ -103,7 +103,11 @@ function decryptContent(stored) {
     const iv = raw.subarray(0, 12);
     const tag = raw.subarray(12, 28);
     const ct = raw.subarray(28);
-    const decipher = crypto.createDecipheriv("aes-256-gcm", MESSAGE_ENC_KEY, iv);
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      MESSAGE_ENC_KEY,
+      iv,
+    );
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ct), decipher.final()]).toString(
       "utf8",
@@ -205,8 +209,7 @@ app.post(
       email && String(email).trim()
         ? String(email).trim()
         : `${String(id)}@noemail.local`;
-    const safeRole =
-      role && String(role).trim() ? String(role).trim() : null;
+    const safeRole = role && String(role).trim() ? String(role).trim() : null;
 
     let chatUser = await prisma.chatUser.findUnique({
       where: {
@@ -284,7 +287,8 @@ app.post(
         u.email && String(u.email).trim()
           ? String(u.email).trim()
           : `${String(id)}@noemail.local`;
-      const safeRole = u.role && String(u.role).trim() ? String(u.role).trim() : null;
+      const safeRole =
+        u.role && String(u.role).trim() ? String(u.role).trim() : null;
 
       try {
         await prisma.chatUser.upsert({
@@ -339,34 +343,39 @@ app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 // List rooms for a user
-app.get(`${API_BASE}/users/:userId/rooms`, authenticateChatJWT, async (req, res) => {
-  const { userId } = req.params;
-  try {
-    const rooms = await prisma.chatRoom.findMany({
-      where: { projectId: req.projectId, members: { some: { userId } } },
-      include: { members: { include: { user: true } } },
-      orderBy: [
-        { lastMessageAt: { sort: "desc", nulls: "last" } },
-        { createdAt: "desc" },
-      ],
-    });
-    // Previews are stored encrypted at rest; decrypt for display.
-    const out = rooms.map((r) => ({
-      ...r,
-      lastMessagePreview: decryptContent(r.lastMessagePreview),
-    }));
-    res.json(out);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
+app.get(
+  `${API_BASE}/users/:userId/rooms`,
+  authenticateChatJWT,
+  async (req, res) => {
+    const { userId } = req.params;
+    try {
+      const rooms = await prisma.chatRoom.findMany({
+        where: { projectId: req.projectId, members: { some: { userId } } },
+        include: { members: { include: { user: true } } },
+        orderBy: [
+          { lastMessageAt: { sort: "desc", nulls: "last" } },
+          { createdAt: "desc" },
+        ],
+      });
+      // Previews are stored encrypted at rest; decrypt for display.
+      const out = rooms.map((r) => ({
+        ...r,
+        lastMessagePreview: decryptContent(r.lastMessagePreview),
+      }));
+      res.json(out);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  },
+);
 
 // Create or get direct 1-to-1 room
 app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
   // The current user is the authenticated JWT user, not a client-supplied id.
   const userId1 = req.userId;
   // Accept the other party from either field name for backwards compatibility.
-  const userId2 = req.body?.userId2 || req.body?.otherUserId || req.body?.userId1;
+  const userId2 =
+    req.body?.userId2 || req.body?.otherUserId || req.body?.userId1;
 
   if (!userId1 || !userId2)
     return res.status(400).json({ error: "userId2 (other user) is required" });
@@ -402,6 +411,8 @@ app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
       data: {
         projectId: req.projectId,
         isGroup: false,
+        directStatus: "pending",
+        requestedById: userId1,
         members: { create: [{ userId: userId1 }, { userId: userId2 }] },
       },
       include: { members: { include: { user: true } } },
@@ -412,6 +423,57 @@ app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
+// Accept an incoming direct-message request before replying.
+app.post(
+  `${API_BASE}/rooms/:roomId/accept`,
+  authenticateChatJWT,
+  async (req, res) => {
+    const { roomId } = req.params;
+    try {
+      const room = await prisma.chatRoom.findFirst({
+        where: { id: roomId, projectId: req.projectId, isGroup: false },
+        include: { members: { include: { user: true } } },
+      });
+      if (!room)
+        return res.status(404).json({ error: "Direct room not found" });
+
+      const isMember = room.members.some(
+        (member) => member.userId === req.userId,
+      );
+      if (!isMember)
+        return res.status(403).json({ error: "Not a member of this room" });
+      if (room.directStatus !== "pending") {
+        return res
+          .status(400)
+          .json({ error: "This message request is not pending" });
+      }
+      if (room.requestedById === req.userId) {
+        return res
+          .status(403)
+          .json({ error: "Only the recipient can accept this request" });
+      }
+
+      const acceptedRoom = await prisma.chatRoom.update({
+        where: { id: roomId },
+        data: { directStatus: "accepted" },
+        include: { members: { include: { user: true } } },
+      });
+
+      for (const member of acceptedRoom.members) {
+        io.to(`user:${member.userId}`).emit("room_updated", {
+          roomId,
+          directStatus: acceptedRoom.directStatus,
+          requestedById: acceptedRoom.requestedById,
+        });
+      }
+      res.json(acceptedRoom);
+    } catch (err) {
+      console.error("rooms/accept error", err);
+      res.status(400).json({ error: err.message });
+    }
+  },
+);
 
 // Create group room
 app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
@@ -457,6 +519,9 @@ app.get(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, async (req, res) => {
       include: { members: { include: { user: true } } },
     });
     if (!room) return res.status(404).json({ error: "Room not found" });
+    if (!room.members.some((member) => member.userId === req.userId)) {
+      return res.status(403).json({ error: "Not a member of this room" });
+    }
     res.json(room);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -479,7 +544,10 @@ app.get(
   async (req, res) => {
     const { roomId } = req.params;
     const rawLimit = parseInt(req.query.limit, 10);
-    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 30, 1), 100);
+    const limit = Math.min(
+      Math.max(Number.isFinite(rawLimit) ? rawLimit : 30, 1),
+      100,
+    );
     const before = req.query.before ? new Date(req.query.before) : null;
 
     try {
@@ -540,7 +608,11 @@ app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
     });
     // Notify the room that this user has read up to now, so senders' ticks turn blue.
     if (io) {
-      io.to(roomId).emit("messages_read", { roomId, readerId: userId, readAt: now });
+      io.to(roomId).emit("messages_read", {
+        roomId,
+        readerId: userId,
+        readAt: now,
+      });
     }
     res.json({ success: true });
   } catch (err) {
@@ -684,7 +756,12 @@ io.on("connection", (socket) => {
     const room = await prisma.chatRoom.findFirst({
       where: { id: roomId, projectId: socket.projectId },
     });
-    if (!room)
+    const membership =
+      room &&
+      (await prisma.chatRoomMember.findUnique({
+        where: { roomId_userId: { roomId, userId: socket.userId } },
+      }));
+    if (!room || !membership)
       return socket.emit("error", {
         message: "Room not found or unauthorized",
       });
@@ -708,6 +785,39 @@ io.on("connection", (socket) => {
         });
         if (!room) return socket.emit("error", { message: "Room not found" });
 
+        const members = await prisma.chatRoomMember.findMany({
+          where: { roomId },
+          select: { userId: true },
+        });
+        if (!members.some((member) => member.userId === senderId)) {
+          return socket.emit("error", { message: "Not a member of this room" });
+        }
+
+        if (!room.isGroup && room.directStatus === "pending") {
+          if (room.requestedById !== senderId) {
+            return socket.emit("error", {
+              message: "Accept this message request before replying",
+            });
+          }
+
+          const existingRequestMessage = await prisma.message.findFirst({
+            where: { roomId },
+            orderBy: { createdAt: "asc" },
+            include: { sender: true },
+          });
+          if (existingRequestMessage) {
+            const outgoing = {
+              ...decryptMessage(existingRequestMessage),
+              clientId: clientId || null,
+            };
+            return socket.emit("message_ack", {
+              clientId: clientId || null,
+              status: "saved",
+              message: outgoing,
+            });
+          }
+        }
+
         const sender = await prisma.chatUser.findFirst({
           where: { id: senderId, projectId: socket.projectId },
         });
@@ -729,10 +839,6 @@ io.on("connection", (socket) => {
           : content?.slice(0, 100) || "";
 
         // Is anyone else in the room currently online? If so, mark delivered now.
-        const members = await prisma.chatRoomMember.findMany({
-          where: { roomId },
-          select: { userId: true },
-        });
         const onlineIds = new Set(
           [...onlineUsers.values()]
             .filter((u) => u.projectId === socket.projectId)
@@ -769,7 +875,10 @@ io.on("connection", (socket) => {
 
         // Emit the DECRYPTED message (plus the clientId so the sender can
         // reconcile their optimistic bubble) once to the room channel.
-        const outgoing = { ...decryptMessage(created), clientId: clientId || null };
+        const outgoing = {
+          ...decryptMessage(created),
+          clientId: clientId || null,
+        };
         io.to(roomId).emit("new_message", outgoing);
 
         // Explicit persistence acknowledgement to the sender, so the client
@@ -785,6 +894,8 @@ io.on("connection", (socket) => {
             roomId,
             lastMessageAt: created.createdAt,
             lastMessagePreview: plainPreview, // realtime plaintext to members
+            directStatus: room.directStatus,
+            requestedById: room.requestedById,
             message: outgoing,
           });
         }

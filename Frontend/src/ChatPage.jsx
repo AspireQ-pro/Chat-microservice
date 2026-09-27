@@ -1,26 +1,56 @@
-import React, { useState } from 'react'
-import { Paper } from '@mui/material'
-import { useChatHandler } from '@/handler/chat'
-import ContactPanel from '@/components/ContactPanel'
-import ChatWindow from '@/components/ChatWindow'
-import CreateGroupDialog from '@/components/CreateGroupDialog'
-import GroupMembersDialog from '@/components/GroupMembersDialog'
+import React, { useState } from "react";
+import { Paper } from "@mui/material";
+import { useChatHandler } from "@/handler/chat";
+import ContactPanel from "@/components/ContactPanel";
+import ChatWindow from "@/components/ChatWindow";
+import CreateGroupDialog from "@/components/CreateGroupDialog";
+import GroupMembersDialog from "@/components/GroupMembersDialog";
 
 function ChatPage() {
   const {
-    input, search, showPanel, isMobile,
-    activeContact, activeRoomId, activeRoom, headerStatus, messages,
-    filteredContacts, contacts, rooms, messagesEndRef, messagesContainerRef,
-    hasMoreOlder, loadingOlder,
-    setInput, setSearch, setShowPanel, setGroupName,
-    handleSend, handleKeyDown, handleRetryMessage, handleMessagesScroll,
-    handleSelectContact, handleSelectRoom,
-    getLastMessage, getUnreadCount, unreadCounts,
-    groupDialogOpen, groupName, groupMemberIds, groupCreating, groupError,
-    openGroupDialog, closeGroupDialog, toggleGroupMember, handleCreateGroup,
-  } = useChatHandler()
+    input,
+    search,
+    showPanel,
+    isMobile,
+    activeContact,
+    activeRoomId,
+    activeRoom,
+    headerStatus,
+    messages,
+    chatUserId,
+    filteredContacts,
+    contacts,
+    rooms,
+    messagesEndRef,
+    messagesContainerRef,
+    hasMoreOlder,
+    loadingOlder,
+    setInput,
+    setSearch,
+    setShowPanel,
+    setGroupName,
+    handleSend,
+    handleKeyDown,
+    handleRetryMessage,
+    handleMessagesScroll,
+    handleSelectContact,
+    handleSelectRoom,
+    handleAcceptRequest,
+    getLastMessage,
+    getUnreadCount,
+    unreadCounts,
+    groupDialogOpen,
+    groupName,
+    groupMemberIds,
+    groupCreating,
+    groupError,
+    openGroupDialog,
+    closeGroupDialog,
+    toggleGroupMember,
+    handleCreateGroup,
+  } = useChatHandler();
 
-  const [membersDialogOpen, setMembersDialogOpen] = useState(false)
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
 
   const panel = (
     <ContactPanel
@@ -38,13 +68,14 @@ function ChatPage() {
       activeRoomId={activeRoomId}
       openGroupDialog={openGroupDialog}
     />
-  )
+  );
 
   const window = (
     <ChatWindow
       isMobile={isMobile}
       activeContact={activeContact}
       activeRoom={activeRoom}
+      currentUserId={chatUserId}
       headerStatus={headerStatus}
       messages={messages}
       messagesEndRef={messagesEndRef}
@@ -53,6 +84,7 @@ function ChatPage() {
       loadingOlder={loadingOlder}
       onMessagesScroll={handleMessagesScroll}
       onRetryMessage={handleRetryMessage}
+      onAcceptRequest={handleAcceptRequest}
       input={input}
       setInput={setInput}
       handleSend={handleSend}
@@ -60,18 +92,33 @@ function ChatPage() {
       setShowPanel={setShowPanel}
       onViewMembers={() => setMembersDialogOpen(true)}
     />
-  )
+  );
 
   return (
     <Paper
       elevation={0}
       sx={{
-        display: 'flex', height: '100%', minHeight: 0,
-        border: '1px solid', borderColor: 'divider',
-        borderRadius: 0, overflow: 'hidden',
+        display: "flex",
+        height: "100%",
+        minHeight: 0,
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 0,
+        overflow: "hidden",
       }}
     >
-      {isMobile ? (showPanel ? panel : window) : <>{panel}{window}</>}
+      {isMobile ? (
+        showPanel ? (
+          panel
+        ) : (
+          window
+        )
+      ) : (
+        <>
+          {panel}
+          {window}
+        </>
+      )}
 
       <CreateGroupDialog
         open={groupDialogOpen}
@@ -91,7 +138,7 @@ function ChatPage() {
         room={activeRoom}
       />
     </Paper>
-  )
+  );
 }
 
-export default ChatPage
+export default ChatPage;

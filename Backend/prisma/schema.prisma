@@ -41,6 +41,8 @@ model ChatRoom {
   projectId         String
   name              String?
   isGroup           Boolean  @default(false)
+  directStatus      String   @default("accepted")
+  requestedById     String?
   lastMessageAt     DateTime?
   lastMessagePreview String?
   createdAt         DateTime @default(now())

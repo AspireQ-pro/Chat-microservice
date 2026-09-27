@@ -113,11 +113,35 @@ export const openDirectRoom = createAsyncThunk(
       if (!userId2) return rejectWithValue("No target user");
       const res = await fetch(`${API_BASE}/rooms/direct`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders(getState) },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(getState),
+        },
         body: JSON.stringify({ userId2 }),
       });
       if (!res.ok) throw new Error("Failed to open direct room");
       return await res.json();
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const acceptDirectRequest = createAsyncThunk(
+  "chat/acceptDirectRequest",
+  async ({ roomId }, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/rooms/${roomId}/accept`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(getState),
+        },
+      });
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.error || "Failed to accept message request");
+      return data;
     } catch (err) {
       return rejectWithValue(err.message);
     }
@@ -129,10 +153,14 @@ export const createGroup = createAsyncThunk(
   async ({ name, memberIds }, { getState, rejectWithValue }) => {
     try {
       const creatorId = currentChatUserId(getState);
-      if (!name || !memberIds?.length) return rejectWithValue("Name and members required");
+      if (!name || !memberIds?.length)
+        return rejectWithValue("Name and members required");
       const res = await fetch(`${API_BASE}/rooms/group`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders(getState) },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(getState),
+        },
         body: JSON.stringify({ name, creatorId, memberIds }),
       });
       if (!res.ok) throw new Error("Failed to create group");
@@ -171,11 +199,15 @@ export const fetchOlderMessages = createAsyncThunk(
   async (roomId, { getState, rejectWithValue }) => {
     try {
       const before = getState().chat.pagination[roomId]?.nextBefore;
-      if (!before) return { roomId, messages: [], hasMore: false, nextBefore: null };
+      if (!before)
+        return { roomId, messages: [], hasMore: false, nextBefore: null };
       const params = new URLSearchParams({ limit: String(PAGE_SIZE), before });
-      const res = await fetch(`${API_BASE}/rooms/${roomId}/messages?${params}`, {
-        headers: authHeaders(getState),
-      });
+      const res = await fetch(
+        `${API_BASE}/rooms/${roomId}/messages?${params}`,
+        {
+          headers: authHeaders(getState),
+        },
+      );
       if (!res.ok) throw new Error("Failed to fetch older messages");
       const data = await res.json();
       return {
@@ -197,7 +229,10 @@ export const markMessagesRead = createAsyncThunk(
     try {
       await fetch(`${API_BASE}/messages/read`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders(getState) },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(getState),
+        },
         body: JSON.stringify({ roomId }),
       });
     } catch (err) {
@@ -231,7 +266,10 @@ const chatSlice = createSlice({
       const { roomId, message } = payload;
       if (!roomId || !message) return;
       if (!state.messages[roomId]) state.messages[roomId] = [];
-      state.messages[roomId].push({ ...message, status: message.status || "sending" });
+      state.messages[roomId].push({
+        ...message,
+        status: message.status || "sending",
+      });
     },
     queueOutbox(state, { payload }) {
       const { clientId, roomId, text } = payload;
@@ -293,7 +331,9 @@ const chatSlice = createSlice({
         );
         if (optIdx !== -1) {
           list[optIdx] = { ...normalized, status: normalized.status || "sent" };
-          state.outbox = state.outbox.filter((o) => o.clientId !== normalized.clientId);
+          state.outbox = state.outbox.filter(
+            (o) => o.clientId !== normalized.clientId,
+          );
           persistOutbox(state.outbox);
           return;
         }
@@ -325,12 +365,21 @@ const chatSlice = createSlice({
       });
     },
     roomUpdated(state, { payload }) {
-      const { roomId, lastMessagePreview, lastMessageAt } = payload;
+      const {
+        roomId,
+        lastMessagePreview,
+        lastMessageAt,
+        directStatus,
+        requestedById,
+      } = payload;
       const idx = state.rooms.findIndex((r) => r.id === roomId);
       if (idx !== -1) {
         const room = state.rooms[idx];
-        room.lastMessagePreview = lastMessagePreview;
-        room.lastMessageAt = lastMessageAt;
+        if (lastMessagePreview !== undefined)
+          room.lastMessagePreview = lastMessagePreview;
+        if (lastMessageAt !== undefined) room.lastMessageAt = lastMessageAt;
+        if (directStatus !== undefined) room.directStatus = directStatus;
+        if (requestedById !== undefined) room.requestedById = requestedById;
         state.rooms.splice(idx, 1);
         state.rooms.unshift(room);
       }
@@ -408,17 +457,28 @@ const chatSlice = createSlice({
 
     builder.addCase(openDirectRoom.fulfilled, (state, { payload }) => {
       state.activeRoomId = payload.id;
-      if (!state.rooms.some((r) => r.id === payload.id)) state.rooms.unshift(payload);
+      const existingIndex = state.rooms.findIndex((r) => r.id === payload.id);
+      if (existingIndex === -1) state.rooms.unshift(payload);
+      else state.rooms[existingIndex] = payload;
+    });
+
+    builder.addCase(acceptDirectRequest.fulfilled, (state, { payload }) => {
+      const existingIndex = state.rooms.findIndex((r) => r.id === payload.id);
+      if (existingIndex === -1) state.rooms.unshift(payload);
+      else state.rooms[existingIndex] = payload;
     });
 
     builder.addCase(createGroup.fulfilled, (state, { payload }) => {
       state.activeRoomId = payload.id;
-      if (!state.rooms.some((r) => r.id === payload.id)) state.rooms.unshift(payload);
+      if (!state.rooms.some((r) => r.id === payload.id))
+        state.rooms.unshift(payload);
     });
 
     builder.addCase(fetchMessages.fulfilled, (state, { payload }) => {
       const { roomId, messages, hasMore, nextBefore, currentUserId } = payload;
-      state.messages[roomId] = messages.map((m) => normalizeMessage(m, currentUserId));
+      state.messages[roomId] = messages.map((m) =>
+        normalizeMessage(m, currentUserId),
+      );
       state.pagination[roomId] = { hasMore, nextBefore, loadingOlder: false };
       state.unreadCounts[roomId] = 0;
     });
@@ -426,10 +486,12 @@ const chatSlice = createSlice({
     builder
       .addCase(fetchOlderMessages.pending, (state, { meta }) => {
         const roomId = meta.arg;
-        if (state.pagination[roomId]) state.pagination[roomId].loadingOlder = true;
+        if (state.pagination[roomId])
+          state.pagination[roomId].loadingOlder = true;
       })
       .addCase(fetchOlderMessages.fulfilled, (state, { payload }) => {
-        const { roomId, messages, hasMore, nextBefore, currentUserId } = payload;
+        const { roomId, messages, hasMore, nextBefore, currentUserId } =
+          payload;
         const older = messages.map((m) => normalizeMessage(m, currentUserId));
         const existing = state.messages[roomId] || [];
         const existingIds = new Set(existing.map((m) => m.id));
@@ -441,7 +503,8 @@ const chatSlice = createSlice({
       })
       .addCase(fetchOlderMessages.rejected, (state, { meta }) => {
         const roomId = meta.arg;
-        if (state.pagination[roomId]) state.pagination[roomId].loadingOlder = false;
+        if (state.pagination[roomId])
+          state.pagination[roomId].loadingOlder = false;
       });
 
     builder.addCase(markMessagesRead.fulfilled, (state, { payload }) => {
