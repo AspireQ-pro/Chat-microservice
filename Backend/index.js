@@ -124,6 +124,26 @@ function decryptMessage(msg) {
   return { ...msg, content: decryptContent(msg.content) };
 }
 
+async function serializeRoomForUser(room, userId) {
+  if (!room) return room;
+  const membership = room.members?.find((member) => member.userId === userId);
+  const unreadCount = membership
+    ? await prisma.message.count({
+        where: {
+          roomId: room.id,
+          senderId: { not: userId },
+          createdAt: { gt: membership.lastReadAt || membership.joinedAt },
+        },
+      })
+    : 0;
+
+  return {
+    ...room,
+    lastMessagePreview: decryptContent(room.lastMessagePreview),
+    unreadCount,
+  };
+}
+
 // ─── Middleware: Resolve project from X-API-KEY (for server-to-server calls) ─
 
 async function resolveProject(req, res, next) {
@@ -362,27 +382,9 @@ app.get(
           { createdAt: "desc" },
         ],
       });
-      const unreadCounts = await Promise.all(
-        rooms.map(async (room) => {
-          const member = room.members.find((entry) => entry.userId === userId);
-          const lastReadAt = member?.lastReadAt || member?.joinedAt;
-          const unreadCount = await prisma.message.count({
-            where: {
-              roomId: room.id,
-              senderId: { not: userId },
-              ...(lastReadAt ? { createdAt: { gt: lastReadAt } } : {}),
-            },
-          });
-          return [room.id, unreadCount];
-        }),
+      const out = await Promise.all(
+        rooms.map((room) => serializeRoomForUser(room, userId)),
       );
-      const unreadByRoom = new Map(unreadCounts);
-      // Previews are stored encrypted at rest; decrypt for display.
-      const out = rooms.map((r) => ({
-        ...r,
-        lastMessagePreview: decryptContent(r.lastMessagePreview),
-        unreadCount: unreadByRoom.get(r.id) || 0,
-      }));
       res.json(out);
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -426,7 +428,8 @@ app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
       },
       include: { members: { include: { user: true } } },
     });
-    if (existing) return res.json(existing);
+    if (existing)
+      return res.json(await serializeRoomForUser(existing, userId1));
 
     const room = await prisma.chatRoom.create({
       data: {
@@ -438,7 +441,7 @@ app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
       },
       include: { members: { include: { user: true } } },
     });
-    res.json(room);
+    res.json(await serializeRoomForUser(room, userId1));
   } catch (err) {
     console.error("rooms/direct error", err);
     res.status(400).json({ error: err.message });
@@ -488,7 +491,7 @@ app.post(
           requestedById: acceptedRoom.requestedById,
         });
       }
-      res.json(acceptedRoom);
+      res.json(await serializeRoomForUser(acceptedRoom, req.userId));
     } catch (err) {
       console.error("rooms/accept error", err);
       res.status(400).json({ error: err.message });
@@ -525,7 +528,7 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
       },
       include: { members: { include: { user: true } } },
     });
-    res.json(room);
+    res.json(await serializeRoomForUser(room, creatorId));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -543,7 +546,7 @@ app.get(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, async (req, res) => {
     if (!room.members.some((member) => member.userId === req.userId)) {
       return res.status(403).json({ error: "Not a member of this room" });
     }
-    res.json(room);
+    res.json(await serializeRoomForUser(room, req.userId));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
