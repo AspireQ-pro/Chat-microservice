@@ -66,7 +66,7 @@ function ChatPage() {
     <Paper
       elevation={0}
       sx={{
-        display: 'flex', height: '100vh', minHeight: 0,
+        display: 'flex', height: '100%', minHeight: 0,
         border: '1px solid', borderColor: 'divider',
         borderRadius: 0, overflow: 'hidden',
       }}
