@@ -56,6 +56,70 @@ function generateApiKey() {
   return "ck_" + crypto.randomBytes(32).toString("hex");
 }
 
+// ─── Message encryption at rest (AES-256-GCM) ───────────────────────────────
+// Content is encrypted before it is written to Postgres and decrypted when
+// served. The server can still read messages (this is encryption-at-rest, not
+// end-to-end), which protects against raw database exposure. Legacy plaintext
+// rows (written before this feature) are detected and returned as-is.
+
+const ENC_PREFIX = "enc:v1:";
+// Derive a stable 32-byte key from a secret. Prefer a dedicated key; fall back
+// to the JWT secret so the feature works even if MESSAGE_ENC_KEY isn't set.
+const MESSAGE_ENC_KEY = crypto
+  .createHash("sha256")
+  .update(
+    String(
+      process.env.MESSAGE_ENC_KEY ||
+        process.env.CHAT_JWT_SECRET ||
+        "chat-message-encryption-fallback",
+    ),
+  )
+  .digest();
+
+function encryptContent(plain) {
+  if (plain == null) return plain;
+  try {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", MESSAGE_ENC_KEY, iv);
+    const ct = Buffer.concat([
+      cipher.update(String(plain), "utf8"),
+      cipher.final(),
+    ]);
+    const tag = cipher.getAuthTag();
+    return ENC_PREFIX + Buffer.concat([iv, tag, ct]).toString("base64");
+  } catch (err) {
+    console.error("encryptContent error", err);
+    return plain; // never lose the message; store plaintext as a last resort
+  }
+}
+
+function decryptContent(stored) {
+  if (stored == null) return stored;
+  if (typeof stored !== "string" || !stored.startsWith(ENC_PREFIX)) {
+    return stored; // legacy plaintext or non-string — return untouched
+  }
+  try {
+    const raw = Buffer.from(stored.slice(ENC_PREFIX.length), "base64");
+    const iv = raw.subarray(0, 12);
+    const tag = raw.subarray(12, 28);
+    const ct = raw.subarray(28);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", MESSAGE_ENC_KEY, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ct), decipher.final()]).toString(
+      "utf8",
+    );
+  } catch (err) {
+    console.error("decryptContent error", err);
+    return ""; // corrupt/undecryptable — return empty rather than throwing
+  }
+}
+
+// Decrypt a message object's content field in place (returns a shallow copy).
+function decryptMessage(msg) {
+  if (!msg) return msg;
+  return { ...msg, content: decryptContent(msg.content) };
+}
+
 // ─── Middleware: Resolve project from X-API-KEY (for server-to-server calls) ─
 
 async function resolveProject(req, res, next) {
@@ -286,7 +350,12 @@ app.get(`${API_BASE}/users/:userId/rooms`, authenticateChatJWT, async (req, res)
         { createdAt: "desc" },
       ],
     });
-    res.json(rooms);
+    // Previews are stored encrypted at rest; decrypt for display.
+    const out = rooms.map((r) => ({
+      ...r,
+      lastMessagePreview: decryptContent(r.lastMessagePreview),
+    }));
+    res.json(out);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -441,8 +510,8 @@ app.get(
 
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
-      // Reverse to oldest→newest for display.
-      const messages = page.reverse();
+      // Reverse to oldest→newest for display, decrypting content.
+      const messages = page.reverse().map(decryptMessage);
       const nextBefore = messages.length ? messages[0].createdAt : null;
 
       res.json({ messages, hasMore, nextBefore });
@@ -458,15 +527,21 @@ app.get(
 // ═════════════════════════════════════════════════════════════════════════════
 
 app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
-  const { roomId, userId } = req.body;
-  if (!roomId || !userId)
-    return res.status(400).json({ error: "roomId and userId required" });
+  // The reader is the authenticated user, not a client-supplied id.
+  const userId = req.userId;
+  const { roomId } = req.body;
+  if (!roomId) return res.status(400).json({ error: "roomId required" });
 
   try {
+    const now = new Date();
     await prisma.message.updateMany({
       where: { roomId, senderId: { not: userId }, isRead: false },
-      data: { isRead: true, readAt: new Date() },
+      data: { isRead: true, readAt: now },
     });
+    // Notify the room that this user has read up to now, so senders' ticks turn blue.
+    if (io) {
+      io.to(roomId).emit("messages_read", { roomId, readerId: userId, readAt: now });
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -572,7 +647,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "send_message",
-    async ({ roomId, content, fileUrl, fileType }) => {
+    async ({ roomId, content, fileUrl, fileType, clientId }) => {
       // The sender is always the authenticated JWT user (never client-supplied).
       const senderId = socket.userId;
       if (!roomId || (!content && !fileUrl)) {
@@ -601,53 +676,134 @@ io.on("connection", (socket) => {
             ? "image"
             : "file"
           : "text";
-        const preview = fileUrl
+        const plainPreview = fileUrl
           ? fileType === "image"
             ? "📷 Photo"
             : "📎 File"
           : content?.slice(0, 100) || "";
 
-        const message = await prisma.message.create({
-          data: { roomId, senderId, content, fileUrl, fileType, messageType },
-          include: { sender: true },
-        });
-
-        await prisma.chatRoom.update({
-          where: { id: roomId },
-          data: { lastMessageAt: new Date(), lastMessagePreview: preview },
-        });
-
-        // Make sure the sender's socket is in the room so they get the echo too.
-        socket.join(roomId);
-
-        // Emit ONCE to the room channel. Everyone who has joined this room
-        // (direct or group) receives it exactly once — no duplicate project-wide
-        // emit. We also notify each member's personal channel so their room list
-        // updates even if they haven't opened the room yet.
-        io.to(roomId).emit("new_message", message);
-
+        // Is anyone else in the room currently online? If so, mark delivered now.
         const members = await prisma.chatRoomMember.findMany({
           where: { roomId },
           select: { userId: true },
         });
+        const onlineIds = new Set(
+          [...onlineUsers.values()]
+            .filter((u) => u.projectId === socket.projectId)
+            .map((u) => u.userId),
+        );
+        const someRecipientOnline = members.some(
+          (m) => m.userId !== senderId && onlineIds.has(m.userId),
+        );
+
+        const created = await prisma.message.create({
+          data: {
+            roomId,
+            senderId,
+            content: encryptContent(content), // encrypted at rest
+            fileUrl,
+            fileType,
+            messageType,
+            deliveredAt: someRecipientOnline ? new Date() : null,
+          },
+          include: { sender: true },
+        });
+
+        // Store an encrypted preview so the room list isn't plaintext at rest.
+        await prisma.chatRoom.update({
+          where: { id: roomId },
+          data: {
+            lastMessageAt: new Date(),
+            lastMessagePreview: encryptContent(plainPreview),
+          },
+        });
+
+        // Ensure the sender is in the room so they get the echo too.
+        socket.join(roomId);
+
+        // Emit the DECRYPTED message (plus the clientId so the sender can
+        // reconcile their optimistic bubble) once to the room channel.
+        const outgoing = { ...decryptMessage(created), clientId: clientId || null };
+        io.to(roomId).emit("new_message", outgoing);
+
         for (const m of members) {
           io.to(`user:${m.userId}`).emit("room_updated", {
             roomId,
-            lastMessageAt: message.createdAt,
-            lastMessagePreview: preview,
-            message,
+            lastMessageAt: created.createdAt,
+            lastMessagePreview: plainPreview, // realtime plaintext to members
+            message: outgoing,
           });
         }
       } catch (err) {
         console.error("Error saving message:", err);
-        socket.emit("error", { message: "Unable to save message" });
+        socket.emit("error", {
+          message: "Unable to save message",
+          clientId: clientId || null,
+        });
       }
     },
   );
 
+  // Recipient acknowledges delivery (message reached their device).
+  socket.on("message_delivered", async ({ roomId }) => {
+    if (!roomId) return;
+    try {
+      const now = new Date();
+      await prisma.message.updateMany({
+        where: {
+          roomId,
+          senderId: { not: socket.userId },
+          deliveredAt: null,
+        },
+        data: { deliveredAt: now },
+      });
+      io.to(roomId).emit("messages_delivered", {
+        roomId,
+        recipientId: socket.userId,
+        deliveredAt: now,
+      });
+    } catch (err) {
+      console.error("message_delivered error", err);
+    }
+  });
+
+  // Recipient read the room's messages.
+  socket.on("messages_read", async ({ roomId }) => {
+    if (!roomId) return;
+    try {
+      const now = new Date();
+      await prisma.message.updateMany({
+        where: { roomId, senderId: { not: socket.userId }, isRead: false },
+        data: { isRead: true, readAt: now, deliveredAt: undefined },
+      });
+      io.to(roomId).emit("messages_read", {
+        roomId,
+        readerId: socket.userId,
+        readAt: now,
+      });
+    } catch (err) {
+      console.error("messages_read error", err);
+    }
+  });
+
   socket.on("disconnect", () => {
     onlineUsers.delete(socket.id);
     broadcastOnlineUsers(socket.projectId);
+    // Record last-seen and notify the project so headers can show "last seen".
+    const now = new Date();
+    prisma.chatUser
+      .update({ where: { id: socket.userId }, data: { lastSeenAt: now } })
+      .catch(() => {});
+    // Only broadcast offline if the user has no other active sockets.
+    const stillOnline = [...onlineUsers.values()].some(
+      (u) => u.userId === socket.userId && u.projectId === socket.projectId,
+    );
+    if (!stillOnline) {
+      io.to(`project:${socket.projectId}`).emit("user_offline", {
+        userId: socket.userId,
+        lastSeenAt: now,
+      });
+    }
   });
 });
 
