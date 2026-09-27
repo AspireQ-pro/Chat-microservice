@@ -348,6 +348,11 @@ app.get(
   authenticateChatJWT,
   async (req, res) => {
     const { userId } = req.params;
+    if (userId !== req.userId) {
+      return res
+        .status(403)
+        .json({ error: "Cannot access another user's rooms" });
+    }
     try {
       const rooms = await prisma.chatRoom.findMany({
         where: { projectId: req.projectId, members: { some: { userId } } },
@@ -357,10 +362,26 @@ app.get(
           { createdAt: "desc" },
         ],
       });
+      const unreadCounts = await Promise.all(
+        rooms.map(async (room) => {
+          const member = room.members.find((entry) => entry.userId === userId);
+          const lastReadAt = member?.lastReadAt || member?.joinedAt;
+          const unreadCount = await prisma.message.count({
+            where: {
+              roomId: room.id,
+              senderId: { not: userId },
+              ...(lastReadAt ? { createdAt: { gt: lastReadAt } } : {}),
+            },
+          });
+          return [room.id, unreadCount];
+        }),
+      );
+      const unreadByRoom = new Map(unreadCounts);
       // Previews are stored encrypted at rest; decrypt for display.
       const out = rooms.map((r) => ({
         ...r,
         lastMessagePreview: decryptContent(r.lastMessagePreview),
+        unreadCount: unreadByRoom.get(r.id) || 0,
       }));
       res.json(out);
     } catch (err) {
@@ -601,11 +622,29 @@ app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
   if (!roomId) return res.status(400).json({ error: "roomId required" });
 
   try {
-    const now = new Date();
-    await prisma.message.updateMany({
-      where: { roomId, senderId: { not: userId }, isRead: false },
-      data: { isRead: true, readAt: now },
+    const membership = await prisma.chatRoom.findFirst({
+      where: {
+        id: roomId,
+        projectId: req.projectId,
+        members: { some: { userId } },
+      },
+      select: { id: true },
     });
+    if (!membership) {
+      return res.status(403).json({ error: "Not a member of this room" });
+    }
+
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.chatRoomMember.update({
+        where: { roomId_userId: { roomId, userId } },
+        data: { lastReadAt: now },
+      }),
+      prisma.message.updateMany({
+        where: { roomId, senderId: { not: userId }, isRead: false },
+        data: { isRead: true, readAt: now },
+      }),
+    ]);
     // Notify the room that this user has read up to now, so senders' ticks turn blue.
     if (io) {
       io.to(roomId).emit("messages_read", {
@@ -613,6 +652,7 @@ app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
         readerId: userId,
         readAt: now,
       });
+      io.to(`user:${userId}`).emit("chat_notification_updated");
     }
     res.json({ success: true });
   } catch (err) {
@@ -629,17 +669,13 @@ app.get(
   async (req, res) => {
     const userId = req.userId;
     try {
-      const [unreadMessages, pendingRequests] = await Promise.all([
-        prisma.message.count({
+      const [memberships, pendingRequests] = await Promise.all([
+        prisma.chatRoomMember.findMany({
           where: {
-            senderId: { not: userId },
-            isRead: false,
-            room: {
-              projectId: req.projectId,
-              directStatus: "accepted",
-              members: { some: { userId } },
-            },
+            userId,
+            room: { projectId: req.projectId, directStatus: "accepted" },
           },
+          select: { roomId: true, joinedAt: true, lastReadAt: true },
         }),
         prisma.chatRoom.count({
           where: {
@@ -651,6 +687,23 @@ app.get(
           },
         }),
       ]);
+      const unreadCounts = await Promise.all(
+        memberships.map((membership) =>
+          prisma.message.count({
+            where: {
+              roomId: membership.roomId,
+              senderId: { not: userId },
+              createdAt: {
+                gt: membership.lastReadAt || membership.joinedAt,
+              },
+            },
+          }),
+        ),
+      );
+      const unreadMessages = unreadCounts.reduce(
+        (total, count) => total + count,
+        0,
+      );
       res.json({
         unreadMessages,
         pendingRequests,
@@ -986,16 +1039,33 @@ io.on("connection", (socket) => {
   socket.on("messages_read", async ({ roomId }) => {
     if (!roomId) return;
     try {
-      const now = new Date();
-      await prisma.message.updateMany({
-        where: { roomId, senderId: { not: socket.userId }, isRead: false },
-        data: { isRead: true, readAt: now, deliveredAt: undefined },
+      const membership = await prisma.chatRoom.findFirst({
+        where: {
+          id: roomId,
+          projectId: socket.projectId,
+          members: { some: { userId: socket.userId } },
+        },
+        select: { id: true },
       });
+      if (!membership) return;
+
+      const now = new Date();
+      await prisma.$transaction([
+        prisma.chatRoomMember.update({
+          where: { roomId_userId: { roomId, userId: socket.userId } },
+          data: { lastReadAt: now },
+        }),
+        prisma.message.updateMany({
+          where: { roomId, senderId: { not: socket.userId }, isRead: false },
+          data: { isRead: true, readAt: now, deliveredAt: undefined },
+        }),
+      ]);
       io.to(roomId).emit("messages_read", {
         roomId,
         readerId: socket.userId,
         readAt: now,
       });
+      io.to(`user:${socket.userId}`).emit("chat_notification_updated");
     } catch (err) {
       console.error("messages_read error", err);
     }

@@ -469,11 +469,15 @@ const chatSlice = createSlice({
       });
 
     builder.addCase(fetchMyRooms.fulfilled, (state, { payload }) => {
-      state.rooms = (payload || []).slice().sort((a, b) => {
+      const rooms = payload || [];
+      state.rooms = rooms.slice().sort((a, b) => {
         const at = new Date(a.lastMessageAt || a.createdAt).getTime();
         const bt = new Date(b.lastMessageAt || b.createdAt).getTime();
         return bt - at;
       });
+      state.unreadCounts = Object.fromEntries(
+        rooms.map((room) => [room.id, room.unreadCount || 0]),
+      );
     });
 
     builder.addCase(

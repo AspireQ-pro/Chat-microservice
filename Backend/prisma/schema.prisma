@@ -53,9 +53,10 @@ model ChatRoom {
 }
 
 model ChatRoomMember {
-  roomId   String
-  userId   String
-  joinedAt DateTime @default(now())
+  roomId     String
+  userId     String
+  joinedAt   DateTime @default(now())
+  lastReadAt DateTime?
 
   room     ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user     ChatUser @relation(fields: [userId], references: [id], onDelete: Cascade)

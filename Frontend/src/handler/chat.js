@@ -61,6 +61,15 @@ function makeClientId() {
   return `c-${Date.now()}-${clientMsgSeq}`;
 }
 
+function findDirectRoom(rooms, contactId, currentUserId) {
+  return rooms.find(
+    (room) =>
+      !room.isGroup &&
+      room.members?.some((member) => member.userId === contactId) &&
+      room.members?.some((member) => member.userId === currentUserId),
+  );
+}
+
 export function useChatHandler() {
   const dispatch = useDispatch();
   const theme = useTheme();
@@ -136,9 +145,24 @@ export function useChatHandler() {
   const messages = rawMessages;
   const activePagination = activeRoomId ? pagination[activeRoomId] : null;
 
-  const filteredContacts = contacts.filter((c) =>
-    (c.name || "").toLowerCase().includes(search.toLowerCase()),
-  );
+  const filteredContacts = contacts
+    .filter((contact) =>
+      (contact.name || "").toLowerCase().includes(search.toLowerCase()),
+    )
+    .slice()
+    .sort((a, b) => {
+      const roomA = findDirectRoom(rooms, a.id, chatUserId);
+      const roomB = findDirectRoom(rooms, b.id, chatUserId);
+      const unreadA = roomA ? unreadCounts[roomA.id] || 0 : 0;
+      const unreadB = roomB ? unreadCounts[roomB.id] || 0 : 0;
+
+      if (unreadA !== unreadB) return unreadB - unreadA;
+
+      const activityA = new Date(roomA?.lastMessageAt || 0).getTime();
+      const activityB = new Date(roomB?.lastMessageAt || 0).getTime();
+      if (activityA !== activityB) return activityB - activityA;
+      return (a.name || "").localeCompare(b.name || "");
+    });
 
   const headerStatus = (() => {
     if (!activeContact) return "";
@@ -387,12 +411,7 @@ export function useChatHandler() {
 
   const getLastMessage = useCallback(
     (contactId) => {
-      const room = rooms.find(
-        (r) =>
-          !r.isGroup &&
-          r.members?.some((m) => m.userId === contactId) &&
-          r.members?.some((m) => m.userId === chatUserId),
-      );
+      const room = findDirectRoom(rooms, contactId, chatUserId);
       if (room?.directStatus === "pending" && !room.lastMessagePreview) {
         return room.requestedById === chatUserId
           ? "Waiting for acceptance"
@@ -409,12 +428,7 @@ export function useChatHandler() {
 
   const getUnreadCount = useCallback(
     (contactId) => {
-      const room = rooms.find(
-        (r) =>
-          !r.isGroup &&
-          r.members?.some((m) => m.userId === contactId) &&
-          r.members?.some((m) => m.userId === chatUserId),
-      );
+      const room = findDirectRoom(rooms, contactId, chatUserId);
       return room ? unreadCounts[room.id] || 0 : 0;
     },
     [rooms, unreadCounts, chatUserId],
