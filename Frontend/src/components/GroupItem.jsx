@@ -11,8 +11,8 @@ function GroupItem({ room, active, unread = 0, onClick }) {
       <ListItem
         onClick={onClick}
         sx={{
-          bgcolor: active ? 'rgba(21,101,192,0.06)' : 'transparent',
-          borderLeft: active ? '3px solid #1565C0' : '3px solid transparent',
+          bgcolor: active || unread ? 'rgba(21,101,192,0.06)' : 'transparent',
+          borderLeft: active || unread ? '3px solid #1565C0' : '3px solid transparent',
           cursor: 'pointer',
           '&:hover': { bgcolor: 'rgba(0,0,0,0.04)' },
           transition: 'all 0.15s',
@@ -21,7 +21,7 @@ function GroupItem({ room, active, unread = 0, onClick }) {
         <ListItemAvatar>
           <Avatar
             sx={{
-              bgcolor: active ? '#1565C0' : '#7b68ee',
+              bgcolor: active || unread ? '#1565C0' : '#7b68ee',
               width: 42, height: 42,
               fontSize: '0.8rem', fontWeight: 700,
             }}

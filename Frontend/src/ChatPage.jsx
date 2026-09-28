@@ -36,6 +36,7 @@ function ChatPage() {
     handleSelectContact,
     handleSelectRoom,
     handleAcceptRequest,
+    handleUploadFile,
     getLastMessage,
     getUnreadCount,
     unreadCounts,
@@ -44,6 +45,9 @@ function ChatPage() {
     groupMemberIds,
     groupCreating,
     groupError,
+    sendError,
+    sendingFirstMessage,
+    uploadingFile,
     openGroupDialog,
     closeGroupDialog,
     toggleGroupMember,
@@ -85,6 +89,10 @@ function ChatPage() {
       onMessagesScroll={handleMessagesScroll}
       onRetryMessage={handleRetryMessage}
       onAcceptRequest={handleAcceptRequest}
+      onUploadFile={handleUploadFile}
+      uploadingFile={uploadingFile}
+      sendError={sendError}
+      sendingFirstMessage={sendingFirstMessage}
       input={input}
       setInput={setInput}
       handleSend={handleSend}

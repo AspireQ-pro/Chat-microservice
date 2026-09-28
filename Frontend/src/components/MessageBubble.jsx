@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import { useSelector } from 'react-redux'
 import { Box, Typography, Button } from '@mui/material'
 import { Check, DoneAll, AccessTime } from '@mui/icons-material'
 
@@ -13,6 +14,40 @@ function Ticks({ status }) {
 
 function MessageBubble({ message, onRetry }) {
   const failed = message.mine && message.status === 'failed'
+  const token = useSelector((state) => state.auth.token)
+  const [attachmentUrl, setAttachmentUrl] = useState(null)
+
+  useEffect(() => {
+    if (!message.fileUrl || !token) {
+      setAttachmentUrl(null)
+      return undefined
+    }
+
+    const controller = new AbortController()
+    let objectUrl = null
+    setAttachmentUrl(null)
+    fetch(message.fileUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Unable to load attachment')
+        return response.blob()
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob)
+        if (!controller.signal.aborted) setAttachmentUrl(objectUrl)
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') console.error(err)
+      })
+
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [message.fileUrl, token])
+
   return (
     <Box
       sx={{
@@ -38,6 +73,31 @@ function MessageBubble({ message, onRetry }) {
         )}
         {message.text && (
           <Typography variant="body2" sx={{ lineHeight: 1.5 }}>{message.text}</Typography>
+        )}
+        {message.fileUrl && message.fileType === 'image' && (
+          attachmentUrl ? (
+            <Box
+              component="img"
+              src={attachmentUrl}
+              alt="Chat attachment"
+              loading="lazy"
+              sx={{ display: 'block', maxWidth: 260, maxHeight: 260, borderRadius: 1, mt: message.text ? 1 : 0.25 }}
+            />
+          ) : (
+            <Typography variant="caption">Loading image…</Typography>
+          )
+        )}
+        {message.fileUrl && message.fileType !== 'image' && attachmentUrl && (
+          <Button
+            component="a"
+            href={attachmentUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            size="small"
+            sx={{ color: message.mine ? '#fff' : '#1565C0', textTransform: 'none', px: 0, minWidth: 0 }}
+          >
+            📎 Open PDF
+          </Button>
         )}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', mt: 0.3, opacity: 0.85 }}>
           <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>{message.time}</Typography>

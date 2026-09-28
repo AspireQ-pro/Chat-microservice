@@ -1,6 +1,11 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "http://localhost:5000" : "");
+if (import.meta.env.PROD && !API) {
+  throw new Error("VITE_API_URL must be configured for the Chat frontend");
+}
 const API_BASE = `${API}/api`;
 const PAGE_SIZE = 30;
 const OUTBOX_KEY = "chat_outbox";
@@ -13,7 +18,11 @@ function authHeaders(getState) {
 // The chat backend keys users by the UUID inside the chat JWT.
 function decodeChatUserId(token) {
   try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
+    const encoded = token.split(".")[1];
+    const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+    const payload = JSON.parse(new TextDecoder().decode(bytes));
     return payload?.userId || null;
   } catch {
     return null;
@@ -45,6 +54,13 @@ function persistOutbox(outbox) {
 
 function normalizeMessage(m, currentUserId) {
   const mine = currentUserId != null && m.senderId === currentUserId;
+  const readBy = Array.isArray(m.readBy) ? m.readBy : [];
+  const recipientCount = Number.isFinite(m.recipientCount)
+    ? m.recipientCount
+    : 1;
+  const isRead = m.readBy
+    ? recipientCount > 0 && readBy.length >= recipientCount
+    : Boolean(m.isRead);
   return {
     id: m.id,
     clientId: m.clientId || null,
@@ -52,19 +68,18 @@ function normalizeMessage(m, currentUserId) {
     senderId: m.senderId,
     senderName: m.sender?.name || "",
     text: m.content || "",
+    fileUrl: m.fileUrl || null,
+    fileType: m.fileType || null,
+    messageType: m.messageType || "text",
     time: new Date(m.createdAt || Date.now()).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     }),
     createdAt: m.createdAt || new Date().toISOString(),
     mine,
-    status: mine
-      ? m.isRead
-        ? "read"
-        : m.deliveredAt
-          ? "delivered"
-          : "sent"
-      : undefined,
+    readBy,
+    recipientCount,
+    status: mine ? (isRead ? "read" : m.deliveredAt ? "delivered" : "sent") : undefined,
   };
 }
 
@@ -121,21 +136,21 @@ export const fetchChatNotificationSummary = createAsyncThunk(
   },
 );
 
-export const openDirectRoom = createAsyncThunk(
-  "chat/openDirectRoom",
-  async ({ userId2 }, { getState, rejectWithValue }) => {
+export const sendDirectRequest = createAsyncThunk(
+  "chat/sendDirectRequest",
+  async ({ userId2, content, clientId }, { getState, rejectWithValue }) => {
     try {
-      if (!userId2) return rejectWithValue("No target user");
-      const res = await fetch(`${API_BASE}/rooms/direct`, {
+      const res = await fetch(`${API_BASE}/rooms/direct/request`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...authHeaders(getState),
         },
-        body: JSON.stringify({ userId2 }),
+        body: JSON.stringify({ userId2, content, clientId }),
       });
-      if (!res.ok) throw new Error("Failed to open direct room");
-      return await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to send message request");
+      return { ...data, currentUserId: currentChatUserId(getState) };
     } catch (err) {
       return rejectWithValue(err.message);
     }
@@ -167,7 +182,6 @@ export const createGroup = createAsyncThunk(
   "chat/createGroup",
   async ({ name, memberIds }, { getState, rejectWithValue }) => {
     try {
-      const creatorId = currentChatUserId(getState);
       if (!name || !memberIds?.length)
         return rejectWithValue("Name and members required");
       const res = await fetch(`${API_BASE}/rooms/group`, {
@@ -176,10 +190,30 @@ export const createGroup = createAsyncThunk(
           "Content-Type": "application/json",
           ...authHeaders(getState),
         },
-        body: JSON.stringify({ name, creatorId, memberIds }),
+        body: JSON.stringify({ name, memberIds }),
       });
       if (!res.ok) throw new Error("Failed to create group");
       return await res.json();
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const uploadChatFile = createAsyncThunk(
+  "chat/uploadChatFile",
+  async ({ roomId, file }, { getState, rejectWithValue }) => {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_BASE}/rooms/${roomId}/upload`, {
+        method: "POST",
+        headers: authHeaders(getState),
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "File upload failed");
+      return { roomId, ...data };
     } catch (err) {
       return rejectWithValue(err.message);
     }
@@ -263,6 +297,7 @@ const chatSlice = createSlice({
     contacts: [],
     rooms: [],
     activeRoomId: null,
+    selectedContactId: null,
     messages: {},
     pagination: {},
     unreadCounts: {},
@@ -276,7 +311,12 @@ const chatSlice = createSlice({
   reducers: {
     setActiveRoom(state, { payload }) {
       state.activeRoomId = payload?.id ?? null;
+      state.selectedContactId = null;
       if (state.activeRoomId) state.unreadCounts[state.activeRoomId] = 0;
+    },
+    selectContact(state, { payload }) {
+      state.activeRoomId = null;
+      state.selectedContactId = payload || null;
     },
     appendMessage(state, { payload }) {
       const { roomId, message } = payload;
@@ -373,11 +413,18 @@ const chatSlice = createSlice({
       });
     },
     messagesRead(state, { payload }) {
-      const { roomId } = payload;
+      const { roomId, readerId, readAt } = payload;
       const list = state.messages[roomId];
       if (!list) return;
       list.forEach((m) => {
-        if (m.mine) m.status = "read";
+        if (!m.mine || !readerId || !readAt) return;
+        if (new Date(m.createdAt).getTime() > new Date(readAt).getTime()) return;
+        const readers = new Set(m.readBy || []);
+        readers.add(readerId);
+        m.readBy = [...readers];
+        if (m.recipientCount > 0 && readers.size >= m.recipientCount) {
+          m.status = "read";
+        }
       });
     },
     roomUpdated(state, { payload }) {
@@ -399,6 +446,14 @@ const chatSlice = createSlice({
         state.rooms.splice(idx, 1);
         state.rooms.unshift(room);
       }
+    },
+    groupCreated(state, { payload }) {
+      const room = payload?.room;
+      if (!room?.id) return;
+      const existingIndex = state.rooms.findIndex((item) => item.id === room.id);
+      if (existingIndex === -1) state.rooms.unshift(room);
+      else state.rooms[existingIndex] = room;
+      state.unreadCounts[room.id] = room.unreadCount || 0;
     },
     setConnected(state, { payload }) {
       state.connected = payload;
@@ -424,6 +479,7 @@ const chatSlice = createSlice({
       state.contacts = [];
       state.rooms = [];
       state.activeRoomId = null;
+      state.selectedContactId = null;
       state.messages = {};
       state.pagination = {};
       state.unreadCounts = {};
@@ -491,13 +547,6 @@ const chatSlice = createSlice({
       },
     );
 
-    builder.addCase(openDirectRoom.fulfilled, (state, { payload }) => {
-      state.activeRoomId = payload.id;
-      const existingIndex = state.rooms.findIndex((r) => r.id === payload.id);
-      if (existingIndex === -1) state.rooms.unshift(payload);
-      else state.rooms[existingIndex] = payload;
-    });
-
     builder.addCase(acceptDirectRequest.fulfilled, (state, { payload }) => {
       const existingIndex = state.rooms.findIndex((r) => r.id === payload.id);
       if (existingIndex === -1) state.rooms.unshift(payload);
@@ -506,8 +555,21 @@ const chatSlice = createSlice({
 
     builder.addCase(createGroup.fulfilled, (state, { payload }) => {
       state.activeRoomId = payload.id;
+      state.selectedContactId = null;
       if (!state.rooms.some((r) => r.id === payload.id))
         state.rooms.unshift(payload);
+    });
+
+    builder.addCase(sendDirectRequest.fulfilled, (state, { payload }) => {
+      const { room, message, currentUserId } = payload;
+      if (!room?.id || !message) return;
+      state.activeRoomId = room.id;
+      state.selectedContactId = null;
+      const roomIndex = state.rooms.findIndex((item) => item.id === room.id);
+      if (roomIndex === -1) state.rooms.unshift(room);
+      else state.rooms[roomIndex] = room;
+      state.messages[room.id] = [normalizeMessage(message, currentUserId)];
+      state.unreadCounts[room.id] = room.unreadCount || 0;
     });
 
     builder.addCase(fetchMessages.fulfilled, (state, { payload }) => {
@@ -552,6 +614,7 @@ const chatSlice = createSlice({
 
 export const {
   setActiveRoom,
+  selectContact,
   appendMessage,
   queueOutbox,
   messageSaved,
@@ -561,6 +624,7 @@ export const {
   messagesDelivered,
   messagesRead,
   roomUpdated,
+  groupCreated,
   setConnected,
   setOnlineUsers,
   userOffline,

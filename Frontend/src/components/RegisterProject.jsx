@@ -2,10 +2,13 @@ import React, { useState } from 'react'
 import { Box, Typography, TextField, Button, Paper, Alert, Snackbar } from '@mui/material'
 import ContentCopy from '@mui/icons-material/ContentCopy'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+const API =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:5000' : '')
 
 function RegisterProject() {
   const [name, setName] = useState('')
+  const [registrationSecret, setRegistrationSecret] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -13,7 +16,7 @@ function RegisterProject() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!name.trim()) return
+    if (!name.trim() || !registrationSecret.trim()) return
     setLoading(true)
     setResult(null)
     setError('')
@@ -21,7 +24,10 @@ function RegisterProject() {
     try {
       const res = await fetch(`${API}/api/projects`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-REGISTRATION-SECRET': registrationSecret,
+        },
         body: JSON.stringify({ name: name.trim() }),
       })
       const data = await res.json()
@@ -41,6 +47,16 @@ function RegisterProject() {
     }
   }
 
+  if (import.meta.env.PROD) {
+    return (
+      <Box sx={{ maxWidth: 500, mx: 'auto', mt: 6, px: 2 }}>
+        <Alert severity="info">
+          Project registration is an administrative server-side operation. Contact your system administrator.
+        </Alert>
+      </Box>
+    )
+  }
+
   return (
     <Box sx={{ maxWidth: 500, mx: 'auto', mt: 6, px: 2 }}>
       <Paper sx={{ p: 4, borderRadius: 3 }}>
@@ -56,6 +72,16 @@ function RegisterProject() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g., Society Management"
+            required
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            type="password"
+            label="Registration Secret"
+            value={registrationSecret}
+            onChange={(e) => setRegistrationSecret(e.target.value)}
+            autoComplete="off"
             required
             sx={{ mb: 2 }}
           />

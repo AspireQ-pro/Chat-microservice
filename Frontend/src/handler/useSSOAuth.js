@@ -5,7 +5,10 @@ import { setAuth } from '@/provider/authSlice'
 function decodeToken(token) {
   try {
     const payload = token.split('.')[1]
-    return JSON.parse(atob(payload))
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')
+    const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0))
+    return JSON.parse(new TextDecoder().decode(bytes))
   } catch {
     return null
   }
@@ -55,6 +58,35 @@ export function useSSOAuth() {
       },
     }))
   }, [dispatch, user, token])
+
+  useEffect(() => {
+    const handleSessionRefresh = (event) => {
+      const expectedOrigin = import.meta.env.VITE_SOCIETY_ORIGIN
+        ? new URL(import.meta.env.VITE_SOCIETY_ORIGIN).origin
+        : document.referrer
+          ? new URL(document.referrer).origin
+          : null
+      if (!expectedOrigin || event.origin !== expectedOrigin) return
+      if (event.source !== window.parent) return
+      if (event.data?.source !== "society-management") return
+      if (event.data?.type !== "chat:session-token") return
+      if (typeof event.data?.token !== "string") return
+
+      const refreshedUser = decodeToken(event.data.token)
+      if (!refreshedUser?.userId || !refreshedUser?.projectId) return
+      dispatch(setAuth({
+        token: event.data.token,
+        user: {
+          id: refreshedUser.userId,
+          name: refreshedUser.name,
+          email: refreshedUser.email,
+        },
+      }))
+    }
+
+    window.addEventListener("message", handleSessionRefresh)
+    return () => window.removeEventListener("message", handleSessionRefresh)
+  }, [dispatch])
 
   return { user, token, loading, error }
 }

@@ -5,6 +5,7 @@ import getSocket, { connectSocket } from "@/services/socket";
 import { publishChatNotificationSummary } from "@/services/notifications";
 import {
   setActiveRoom,
+  selectContact,
   appendMessage,
   queueOutbox,
   messageSaved,
@@ -14,13 +15,15 @@ import {
   messagesDelivered,
   messagesRead,
   roomUpdated,
+  groupCreated,
   setConnected,
   setOnlineUsers,
   userOffline,
   fetchUsers,
   fetchMyRooms,
   fetchChatNotificationSummary,
-  openDirectRoom,
+  sendDirectRequest,
+  uploadChatFile,
   acceptDirectRequest,
   fetchMessages,
   fetchOlderMessages,
@@ -36,7 +39,11 @@ export const ROLE_COLOR = {
 
 function decodeChatUserId(token) {
   try {
-    return JSON.parse(atob(token.split(".")[1]))?.userId || null;
+    const payload = token.split(".")[1];
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes))?.userId || null;
   } catch {
     return null;
   }
@@ -78,6 +85,7 @@ export function useChatHandler() {
   const currentUser = useSelector((s) => s.auth.user);
   const authToken = useSelector((s) => s.auth.token);
   const activeRoomId = useSelector((s) => s.chat.activeRoomId);
+  const selectedContactId = useSelector((s) => s.chat.selectedContactId);
   const allMessages = useSelector((s) => s.chat.messages);
   const contacts = useSelector((s) => s.chat.contacts);
   const rooms = useSelector((s) => s.chat.rooms);
@@ -106,11 +114,15 @@ export function useChatHandler() {
   const [groupMemberIds, setGroupMemberIds] = useState([]);
   const [groupCreating, setGroupCreating] = useState(false);
   const [groupError, setGroupError] = useState("");
+  const [sendError, setSendError] = useState("");
+  const [sendingFirstMessage, setSendingFirstMessage] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   const searchTimer = useRef(null);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const activeRoomIdRef = useRef(null);
+  const selectedContactIdRef = useRef(selectedContactId);
   const prevScrollHeightRef = useRef(0);
   const outboxRef = useRef(outbox);
 
@@ -120,11 +132,16 @@ export function useChatHandler() {
   useEffect(() => {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
+  useEffect(() => {
+    selectedContactIdRef.current = selectedContactId;
+  }, [selectedContactId]);
 
   const activeRoom = rooms.find((r) => r.id === activeRoomId) ?? null;
 
   const activeContact = (() => {
-    if (!activeRoom) return null;
+    if (!activeRoom) {
+      return contacts.find((contact) => contact.id === selectedContactId) ?? null;
+    }
     if (activeRoom.isGroup) {
       return {
         id: activeRoom.id,
@@ -239,10 +256,27 @@ export function useChatHandler() {
     const onRoomUpd = (p) => {
       dispatch(roomUpdated(p || {}));
       if (p?.roomId) {
-        dispatch(fetchMyRooms());
+        dispatch(fetchMyRooms())
+          .unwrap()
+          .then((updatedRooms) => {
+            if (
+              p.directStatus !== "pending" ||
+              p.requestedById === myChatId ||
+              !selectedContactIdRef.current
+            ) return;
+            const requestRoom = updatedRooms.find((room) => room.id === p.roomId);
+            const otherMember = requestRoom?.members?.find(
+              (member) => member.userId !== myChatId,
+            );
+            if (otherMember?.userId === selectedContactIdRef.current) {
+              dispatch(setActiveRoom(requestRoom));
+            }
+          })
+          .catch(() => {});
         dispatch(fetchChatNotificationSummary());
       }
     };
+    const onGroupCreated = (p) => dispatch(groupCreated(p || {}));
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -253,6 +287,7 @@ export function useChatHandler() {
     socket.on("messages_delivered", onDelivered);
     socket.on("messages_read", onRead);
     socket.on("room_updated", onRoomUpd);
+    socket.on("group_created", onGroupCreated);
 
     if (socket.connected) onConnect();
 
@@ -266,6 +301,7 @@ export function useChatHandler() {
       socket.off("messages_delivered", onDelivered);
       socket.off("messages_read", onRead);
       socket.off("room_updated", onRoomUpd);
+      socket.off("group_created", onGroupCreated);
     };
   }, [dispatch, currentUser?.id, authToken]);
 
@@ -322,9 +358,31 @@ export function useChatHandler() {
     [dispatch, activeRoomId, pagination],
   );
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || !activeRoomId) return;
+    if (!text) return;
+    if (!activeRoomId && selectedContactId) {
+      if (sendingFirstMessage) return;
+      setSendingFirstMessage(true);
+      setSendError("");
+      try {
+        await dispatch(
+          sendDirectRequest({
+            userId2: selectedContactId,
+            content: text,
+            clientId: makeClientId(),
+          }),
+        ).unwrap();
+        setInput("");
+      } catch (err) {
+        setSendError(err || "Could not send the message request. Try again.");
+      } finally {
+        setSendingFirstMessage(false);
+      }
+      return;
+    }
+    if (!activeRoomId) return;
+    setSendError("");
     const clientId = makeClientId();
     const socket = getSocket();
     const online = !!(socket && socket.connected);
@@ -360,7 +418,15 @@ export function useChatHandler() {
       dispatch(queueOutbox({ clientId, roomId: activeRoomId, text }));
     }
     setInput("");
-  }, [dispatch, input, activeRoomId, chatUserId, currentUser?.name]);
+  }, [
+    dispatch,
+    input,
+    activeRoomId,
+    selectedContactId,
+    sendingFirstMessage,
+    chatUserId,
+    currentUser?.name,
+  ]);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -373,14 +439,21 @@ export function useChatHandler() {
     (message) => {
       if (!message?.clientId) return;
       const socket = getSocket();
-      dispatch(retryingMessage({ clientId: message.clientId }));
       if (socket && socket.connected) {
+        dispatch(retryingMessage({ clientId: message.clientId }));
         socket.emit("send_message", {
           roomId: message.roomId,
-          content: message.text,
+          content: message.text || undefined,
+          fileUrl: message.fileUrl || undefined,
+          fileType: message.fileType || undefined,
           clientId: message.clientId,
         });
       } else {
+        if (message.fileUrl) {
+          setSendError("Reconnect to Chat before retrying this attachment.");
+          return;
+        }
+        dispatch(retryingMessage({ clientId: message.clientId }));
         dispatch(
           queueOutbox({
             clientId: message.clientId,
@@ -393,12 +466,66 @@ export function useChatHandler() {
     [dispatch],
   );
 
+  const handleUploadFile = useCallback(async (file) => {
+    if (!file || !activeRoomId) return;
+    const socket = getSocket();
+    if (!socket?.connected) {
+      setSendError("Connect to Chat before sending an attachment.");
+      return;
+    }
+
+    setUploadingFile(true);
+    setSendError("");
+    try {
+      const uploaded = await dispatch(
+        uploadChatFile({ roomId: activeRoomId, file }),
+      ).unwrap();
+      const clientId = makeClientId();
+      dispatch(
+        appendMessage({
+          roomId: activeRoomId,
+          message: {
+            id: `optimistic-${clientId}`,
+            clientId,
+            roomId: activeRoomId,
+            senderId: chatUserId,
+            senderName: currentUser?.name || "",
+            text: "",
+            fileUrl: uploaded.fileUrl,
+            fileType: uploaded.fileType,
+            messageType: uploaded.fileType === "image" ? "image" : "file",
+            time: new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            createdAt: new Date().toISOString(),
+            mine: true,
+            status: "sending",
+          },
+        }),
+      );
+      socket.emit("send_message", {
+        roomId: activeRoomId,
+        fileUrl: uploaded.fileUrl,
+        fileType: uploaded.fileType,
+        clientId,
+      });
+    } catch (err) {
+      setSendError(err || "File upload failed. Try again.");
+    } finally {
+      setUploadingFile(false);
+    }
+  }, [dispatch, activeRoomId, chatUserId, currentUser?.name]);
+
   const handleSelectContact = useCallback(
-    async (contactId) => {
-      await dispatch(openDirectRoom({ userId2: contactId }));
+    (contactId) => {
+      const room = findDirectRoom(rooms, contactId, chatUserId);
+      setSendError("");
+      if (room) dispatch(setActiveRoom(room));
+      else dispatch(selectContact(contactId));
       if (isMobile) setShowPanel(false);
     },
-    [dispatch, isMobile],
+    [dispatch, rooms, chatUserId, isMobile],
   );
 
   const handleSelectRoom = useCallback(
@@ -465,11 +592,15 @@ export function useChatHandler() {
     try {
       await dispatch(
         createGroup({ name: groupName.trim(), memberIds: groupMemberIds }),
-      );
+      ).unwrap();
       closeGroupDialog();
       if (isMobile) setShowPanel(false);
-    } catch {
-      setGroupError("Failed to create group. Try again.");
+    } catch (err) {
+      setGroupError(
+        typeof err === "string"
+          ? err
+          : err?.message || "Failed to create group. Try again.",
+      );
     } finally {
       setGroupCreating(false);
     }
@@ -500,6 +631,9 @@ export function useChatHandler() {
     groupMemberIds,
     groupCreating,
     groupError,
+    sendError,
+    sendingFirstMessage,
+    uploadingFile,
     setInput,
     setSearch,
     setShowPanel,
@@ -511,6 +645,7 @@ export function useChatHandler() {
     handleSelectContact,
     handleSelectRoom,
     handleAcceptRequest,
+    handleUploadFile,
     getLastMessage,
     getUnreadCount,
     openGroupDialog,

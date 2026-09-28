@@ -1,7 +1,10 @@
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const cors = require("cors");
+const multer = require("multer");
 const { Server } = require("socket.io");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
@@ -13,17 +16,106 @@ const server = http.createServer(app);
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-const CHAT_JWT_SECRET =
-  process.env.CHAT_JWT_SECRET || crypto.randomBytes(64).toString("hex");
+const isProduction = process.env.NODE_ENV === "production";
+const CHAT_JWT_SECRET = process.env.CHAT_JWT_SECRET ||
+  (!isProduction ? crypto.randomBytes(64).toString("hex") : "");
+const isPlaceholderSecret = (value) => /^(replace|change|your[-_])/i.test(String(value || ""));
+if (
+  isProduction &&
+  (CHAT_JWT_SECRET.length < 32 || isPlaceholderSecret(CHAT_JWT_SECRET))
+) {
+  throw new Error("CHAT_JWT_SECRET must be configured with at least 32 characters in production");
+}
+if (isProduction && (!process.env.PROJECT_REGISTRATION_SECRET || isPlaceholderSecret(process.env.PROJECT_REGISTRATION_SECRET))) {
+  throw new Error("PROJECT_REGISTRATION_SECRET must be configured in production");
+}
+
 const BACKEND_URL = (
   process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`
 ).replace(/\/$/, "");
-const corsOrigin = process.env.CORS_ORIGIN || "*";
+const corsOrigins = String(
+  process.env.CORS_ORIGIN ||
+    (isProduction
+      ? ""
+      : "http://localhost:3001,http://localhost:5173,http://localhost:3000"),
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+if (isProduction && (!corsOrigins.length || corsOrigins.includes("*"))) {
+  throw new Error("CORS_ORIGIN must list explicit frontend origins in production");
+}
+if (isProduction && corsOrigins.some((origin) => {
+  try { return new URL(origin).protocol !== "https:"; } catch { return true; }
+})) {
+  throw new Error("Every production CORS_ORIGIN must be a valid HTTPS origin");
+}
+const corsOrigin = corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins;
 const API_BASE = "/api";
 const CHAT_FRONTEND_URL = (
   process.env.CHAT_FRONTEND_URL ||
-  `http://localhost:${process.env.CHAT_FRONTEND_PORT || 3001}`
+  (!isProduction ? `http://localhost:${process.env.CHAT_FRONTEND_PORT || 3001}` : "")
 ).replace(/\/$/, "");
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const UPLOAD_TYPES = {
+  "image/jpeg": { extension: ".jpg", fileType: "image" },
+  "image/png": { extension: ".png", fileType: "image" },
+  "image/gif": { extension: ".gif", fileType: "image" },
+  "image/webp": { extension: ".webp", fileType: "image" },
+  "application/pdf": { extension: ".pdf", fileType: "file" },
+};
+
+const uploadFile = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, UPLOAD_DIR),
+    filename: (_req, file, callback) => {
+      const type = UPLOAD_TYPES[file.mimetype];
+      callback(null, `${crypto.randomUUID()}${type?.extension || ""}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    if (!UPLOAD_TYPES[file.mimetype]) {
+      return callback(new Error("Only JPEG, PNG, GIF, WebP, and PDF files are allowed"));
+    }
+    callback(null, true);
+  },
+});
+
+function parseRoomUpload(req, res, next) {
+  uploadFile.single("file")(req, res, (err) => {
+    if (err) {
+      const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+      return sendError(res, status, err.message || "Upload failed");
+    }
+    next();
+  });
+}
+
+function hasAllowedFileSignature(buffer, mimeType) {
+  if (mimeType === "image/jpeg") return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  if (mimeType === "image/png") return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (mimeType === "image/gif") return buffer.subarray(0, 6).toString("ascii").match(/^GIF8[79]a$/) !== null;
+  if (mimeType === "image/webp") return buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP";
+  if (mimeType === "application/pdf") return buffer.subarray(0, 5).toString("ascii") === "%PDF-";
+  return false;
+}
+if (isProduction) {
+  let chatFrontend;
+  try {
+    chatFrontend = new URL(CHAT_FRONTEND_URL);
+  } catch {
+    throw new Error("CHAT_FRONTEND_URL must be configured with the public Chat URL in production");
+  }
+  if (chatFrontend.protocol !== "https:") {
+    throw new Error("CHAT_FRONTEND_URL must use HTTPS in production");
+  }
+  if (new URL(BACKEND_URL).protocol !== "https:") {
+    throw new Error("BACKEND_URL must use HTTPS in production");
+  }
+}
 
 function sendError(res, status, error, details) {
   const payload = { error };
@@ -65,13 +157,16 @@ function generateApiKey() {
 const ENC_PREFIX = "enc:v1:";
 // Derive a stable 32-byte key from a secret. Prefer a dedicated key; fall back
 // to the JWT secret so the feature works even if MESSAGE_ENC_KEY isn't set.
+if (isProduction && (!process.env.MESSAGE_ENC_KEY || isPlaceholderSecret(process.env.MESSAGE_ENC_KEY))) {
+  throw new Error("MESSAGE_ENC_KEY must be configured and kept stable in production");
+}
 const MESSAGE_ENC_KEY = crypto
   .createHash("sha256")
   .update(
     String(
       process.env.MESSAGE_ENC_KEY ||
         process.env.CHAT_JWT_SECRET ||
-        "chat-message-encryption-fallback",
+        "chat-development-encryption-key-change-me",
     ),
   )
   .digest();
@@ -89,6 +184,7 @@ function encryptContent(plain) {
     return ENC_PREFIX + Buffer.concat([iv, tag, ct]).toString("base64");
   } catch (err) {
     console.error("encryptContent error", err);
+    if (isProduction) throw err;
     return plain; // never lose the message; store plaintext as a last resort
   }
 }
@@ -197,6 +293,20 @@ app.get("/", (req, res) => {
 app.post(
   `${API_BASE}/projects`,
   asyncHandler(async (req, res) => {
+    const expectedSecret = process.env.PROJECT_REGISTRATION_SECRET;
+    if (!expectedSecret) {
+      return sendError(res, 503, "Project registration is disabled");
+    }
+    const providedSecret = req.headers["x-registration-secret"];
+    const expectedBuffer = Buffer.from(expectedSecret);
+    const providedBuffer = Buffer.from(String(providedSecret || ""));
+    if (
+      providedBuffer.length !== expectedBuffer.length ||
+      !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+    ) {
+      return sendError(res, 401, "Invalid project registration secret");
+    }
+
     const { name } = req.body;
     if (!name) return sendError(res, 400, "Project name is required");
 
@@ -375,7 +485,15 @@ app.get(
     }
     try {
       const rooms = await prisma.chatRoom.findMany({
-        where: { projectId: req.projectId, members: { some: { userId } } },
+        where: {
+          projectId: req.projectId,
+          members: { some: { userId } },
+          OR: [
+            { isGroup: true },
+            { directStatus: "accepted" },
+            { directStatus: "pending", messages: { some: {} } },
+          ],
+        },
         include: { members: { include: { user: true } } },
         orderBy: [
           { lastMessageAt: { sort: "desc", nulls: "last" } },
@@ -430,23 +548,145 @@ app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
     });
     if (existing)
       return res.json(await serializeRoomForUser(existing, userId1));
-
-    const room = await prisma.chatRoom.create({
-      data: {
-        projectId: req.projectId,
-        isGroup: false,
-        directStatus: "pending",
-        requestedById: userId1,
-        members: { create: [{ userId: userId1 }, { userId: userId2 }] },
-      },
-      include: { members: { include: { user: true } } },
+    return res.status(404).json({
+      error: "No conversation exists yet; send an initial message to create a request",
     });
-    res.json(await serializeRoomForUser(room, userId1));
   } catch (err) {
     console.error("rooms/direct error", err);
     res.status(400).json({ error: err.message });
   }
 });
+
+// Create the initial message and direct room together, so merely selecting a
+// contact cannot create an empty message request.
+app.post(
+  `${API_BASE}/rooms/direct/request`,
+  authenticateChatJWT,
+  async (req, res) => {
+    const senderId = req.userId;
+    const userId2 = req.body?.userId2;
+    const content = typeof req.body?.content === "string" ? req.body.content.trim() : "";
+    const clientId = req.body?.clientId || null;
+
+    if (!userId2 || !content) {
+      return res.status(400).json({ error: "userId2 and a first message are required" });
+    }
+    if (content.length > 10000) {
+      return res.status(400).json({ error: "Message is too long" });
+    }
+    if (senderId === userId2) {
+      return res.status(400).json({ error: "Cannot message yourself" });
+    }
+
+    try {
+      const validUsers = await prisma.chatUser.count({
+        where: { projectId: req.projectId, id: { in: [senderId, userId2] } },
+      });
+      if (validUsers !== 2) {
+        return res.status(403).json({ error: "Users must belong to this project" });
+      }
+
+      const saved = await prisma.$transaction(async (tx) => {
+        let room = await tx.chatRoom.findFirst({
+          where: {
+            projectId: req.projectId,
+            isGroup: false,
+            AND: [
+              { members: { some: { userId: senderId } } },
+              { members: { some: { userId: userId2 } } },
+            ],
+          },
+          include: { members: { include: { user: true } } },
+        });
+
+        if (room?.directStatus === "pending") {
+          const existingMessages = await tx.message.count({ where: { roomId: room.id } });
+          if (existingMessages > 0 && room.requestedById !== senderId) {
+            const error = new Error("Accept this message request before replying");
+            error.statusCode = 403;
+            throw error;
+          }
+          if (existingMessages > 0) {
+            const error = new Error("A message request has already been sent");
+            error.statusCode = 409;
+            throw error;
+          }
+          // Recover empty requests created by older versions when a contact was selected.
+          room = await tx.chatRoom.update({
+            where: { id: room.id },
+            data: { requestedById: senderId },
+            include: { members: { include: { user: true } } },
+          });
+        }
+
+        if (!room) {
+          room = await tx.chatRoom.create({
+            data: {
+              projectId: req.projectId,
+              isGroup: false,
+              directStatus: "pending",
+              requestedById: senderId,
+              members: { create: [{ userId: senderId }, { userId: userId2 }] },
+            },
+            include: { members: { include: { user: true } } },
+          });
+        }
+
+        const recipientOnline = [...onlineUsers.values()].some(
+          (online) => online.projectId === req.projectId && online.userId === userId2,
+        );
+        const message = await tx.message.create({
+          data: {
+            roomId: room.id,
+            senderId,
+            content: encryptContent(content),
+            messageType: "text",
+            deliveredAt: recipientOnline ? new Date() : null,
+          },
+          include: { sender: true },
+        });
+        room = await tx.chatRoom.update({
+          where: { id: room.id },
+          data: {
+            lastMessageAt: message.createdAt,
+            lastMessagePreview: encryptContent(content.slice(0, 100)),
+          },
+          include: { members: { include: { user: true } } },
+        });
+        return { room, message };
+      });
+
+      const outgoing = {
+        ...decryptMessage(saved.message),
+        clientId,
+        readBy: [],
+        recipientCount: saved.room.members.filter(
+          (member) => member.userId !== senderId,
+        ).length,
+      };
+      io.to(saved.room.id).emit("new_message", outgoing);
+      for (const member of saved.room.members) {
+        io.to(`user:${member.userId}`).emit("room_updated", {
+          roomId: saved.room.id,
+          lastMessageAt: saved.message.createdAt,
+          lastMessagePreview: content.slice(0, 100),
+          directStatus: saved.room.directStatus,
+          requestedById: saved.room.requestedById,
+          message: outgoing,
+        });
+      }
+
+      res.status(201).json({
+        room: await serializeRoomForUser(saved.room, senderId),
+        message: outgoing,
+      });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+      console.error("rooms/direct/request error", err);
+      res.status(400).json({ error: err.message });
+    }
+  },
+);
 
 // Accept an incoming direct-message request before replying.
 app.post(
@@ -501,11 +741,12 @@ app.post(
 
 // Create group room
 app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
-  const { name, creatorId, memberIds } = req.body;
-  if (!name || !creatorId || !memberIds?.length) {
+  const { name, memberIds } = req.body;
+  const creatorId = req.userId;
+  if (!name || !memberIds?.length) {
     return res
       .status(400)
-      .json({ error: "name, creatorId, and memberIds are required" });
+      .json({ error: "name and memberIds are required" });
   }
 
   const allIds = Array.from(new Set([creatorId, ...memberIds]));
@@ -528,6 +769,12 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
       },
       include: { members: { include: { user: true } } },
     });
+    await Promise.all(
+      allIds.map(async (userId) => {
+        const memberRoom = await serializeRoomForUser(room, userId);
+        io.to(`user:${userId}`).emit("group_created", { room: memberRoom });
+      }),
+    );
     res.json(await serializeRoomForUser(room, creatorId));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -551,6 +798,75 @@ app.get(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
+app.post(
+  `${API_BASE}/rooms/:roomId/upload`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res, next) => {
+    const member = await prisma.chatRoomMember.findUnique({
+      where: { roomId_userId: { roomId: req.params.roomId, userId: req.userId } },
+      select: { roomId: true },
+    });
+    if (!member) return res.status(403).json({ error: "Not a member of this room" });
+    next();
+  }),
+  parseRoomUpload,
+  asyncHandler(async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "A file is required" });
+    const filePath = path.join(UPLOAD_DIR, req.file.filename);
+    const signature = await fs.promises.readFile(filePath);
+    const allowedType = UPLOAD_TYPES[req.file.mimetype];
+    if (!allowedType || !hasAllowedFileSignature(signature, req.file.mimetype)) {
+      await fs.promises.unlink(filePath).catch(() => {});
+      return res.status(400).json({ error: "File contents do not match an allowed type" });
+    }
+    res.status(201).json({
+      fileUrl: `${BACKEND_URL}${API_BASE}/rooms/${req.params.roomId}/uploads/${req.file.filename}`,
+      fileType: allowedType.fileType,
+      size: req.file.size,
+    });
+  }),
+);
+
+app.get(
+  `${API_BASE}/rooms/:roomId/uploads/:filename`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res) => {
+    const { roomId, filename } = req.params;
+    if (
+      path.basename(filename) !== filename ||
+      !/^[0-9a-f-]{36}\.(jpg|png|gif|webp|pdf)$/i.test(filename)
+    ) {
+      return res.status(404).json({ error: "Attachment not found" });
+    }
+
+    const room = await prisma.chatRoom.findFirst({
+      where: {
+        id: roomId,
+        projectId: req.projectId,
+        members: { some: { userId: req.userId } },
+      },
+      select: { id: true },
+    });
+    if (!room) return res.status(404).json({ error: "Attachment not found" });
+
+    const referenced = await prisma.message.findFirst({
+      where: {
+        roomId,
+        fileUrl: { endsWith: `/uploads/${filename}` },
+      },
+      select: { id: true },
+    });
+    if (!referenced) return res.status(404).json({ error: "Attachment not found" });
+
+    const filePath = path.join(UPLOAD_DIR, filename);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", "inline");
+    res.sendFile(filePath, (err) => {
+      if (err && !res.headersSent) res.status(err.statusCode || 404).end();
+    });
+  }),
+);
 
 // Get room messages (paginated, WhatsApp-style)
 //
@@ -603,7 +919,28 @@ app.get(
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
       // Reverse to oldest→newest for display, decrypting content.
-      const messages = page.reverse().map(decryptMessage);
+      const roomMembers = await prisma.chatRoomMember.findMany({
+        where: { roomId },
+        select: { userId: true, lastReadAt: true },
+      });
+      const messages = page.reverse().map((message) => {
+        const readBy = roomMembers
+          .filter(
+            (member) =>
+              member.userId !== message.senderId &&
+              member.lastReadAt &&
+              new Date(member.lastReadAt) >= new Date(message.createdAt),
+          )
+          .map((member) => member.userId);
+        const recipientCount = roomMembers.filter(
+          (member) => member.userId !== message.senderId,
+        ).length;
+        return {
+          ...decryptMessage(message),
+          readBy,
+          recipientCount,
+        };
+      });
       const nextBefore = messages.length ? messages[0].createdAt : null;
 
       res.json({ messages, hasMore, nextBefore });
@@ -631,23 +968,26 @@ app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
         projectId: req.projectId,
         members: { some: { userId } },
       },
-      select: { id: true },
+        select: { id: true, isGroup: true },
     });
     if (!membership) {
       return res.status(403).json({ error: "Not a member of this room" });
     }
 
     const now = new Date();
-    await prisma.$transaction([
+    const readOperations = [
       prisma.chatRoomMember.update({
         where: { roomId_userId: { roomId, userId } },
         data: { lastReadAt: now },
       }),
-      prisma.message.updateMany({
+    ];
+    if (!membership.isGroup) {
+      readOperations.push(prisma.message.updateMany({
         where: { roomId, senderId: { not: userId }, isRead: false },
         data: { isRead: true, readAt: now },
-      }),
-    ]);
+      }));
+    }
+    await prisma.$transaction(readOperations);
     // Notify the room that this user has read up to now, so senders' ticks turn blue.
     if (io) {
       io.to(roomId).emit("messages_read", {
@@ -686,6 +1026,7 @@ app.get(
             isGroup: false,
             directStatus: "pending",
             requestedById: { not: userId },
+            messages: { some: {} },
             members: { some: { userId } },
           },
         }),
@@ -756,6 +1097,13 @@ app.get(
         where: { id: roomId, projectId: req.projectId },
       });
       if (!room) return res.status(404).json({ error: "Room not found" });
+      const membership = await prisma.chatRoomMember.findUnique({
+        where: { roomId_userId: { roomId, userId: req.userId } },
+        select: { roomId: true },
+      });
+      if (!membership) {
+        return res.status(403).json({ error: "Not a member of this room" });
+      }
       const count = await prisma.message.count({ where: { roomId } });
       const latest = await prisma.message.findFirst({
         where: { roomId },
@@ -977,6 +1325,8 @@ io.on("connection", (socket) => {
         const outgoing = {
           ...decryptMessage(created),
           clientId: clientId || null,
+          readBy: [],
+          recipientCount: members.filter((member) => member.userId !== senderId).length,
         };
         io.to(roomId).emit("new_message", outgoing);
 
@@ -1019,6 +1369,16 @@ io.on("connection", (socket) => {
   socket.on("message_delivered", async ({ roomId }) => {
     if (!roomId) return;
     try {
+      const membership = await prisma.chatRoom.findFirst({
+        where: {
+          id: roomId,
+          projectId: socket.projectId,
+          members: { some: { userId: socket.userId } },
+        },
+        select: { id: true },
+      });
+      if (!membership) return;
+
       const now = new Date();
       await prisma.message.updateMany({
         where: {
@@ -1048,21 +1408,24 @@ io.on("connection", (socket) => {
           projectId: socket.projectId,
           members: { some: { userId: socket.userId } },
         },
-        select: { id: true },
+        select: { id: true, isGroup: true },
       });
       if (!membership) return;
 
       const now = new Date();
-      await prisma.$transaction([
+      const readOperations = [
         prisma.chatRoomMember.update({
           where: { roomId_userId: { roomId, userId: socket.userId } },
           data: { lastReadAt: now },
         }),
-        prisma.message.updateMany({
+      ];
+      if (!membership.isGroup) {
+        readOperations.push(prisma.message.updateMany({
           where: { roomId, senderId: { not: socket.userId }, isRead: false },
           data: { isRead: true, readAt: now, deliveredAt: undefined },
-        }),
-      ]);
+        }));
+      }
+      await prisma.$transaction(readOperations);
       io.to(roomId).emit("messages_read", {
         roomId,
         readerId: socket.userId,

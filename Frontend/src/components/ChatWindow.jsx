@@ -1,16 +1,17 @@
-import React from "react";
+import React, { useRef } from "react";
 import {
-  Box,
-  Typography,
+  Alert,
   Avatar,
   Badge,
+  Box,
+  Button,
+  CircularProgress,
   IconButton,
   TextField,
   Tooltip,
-  CircularProgress,
-  Button,
+  Typography,
 } from "@mui/material";
-import { Send, ArrowBack, Circle, People } from "@mui/icons-material";
+import { AttachFile, ArrowBack, Circle, People, Send } from "@mui/icons-material";
 import MessageBubble from "./MessageBubble";
 
 function ChatWindow({
@@ -27,6 +28,10 @@ function ChatWindow({
   onMessagesScroll,
   onRetryMessage,
   onAcceptRequest,
+  onUploadFile,
+  uploadingFile,
+  sendError,
+  sendingFirstMessage,
   input,
   setInput,
   handleSend,
@@ -34,6 +39,8 @@ function ChatWindow({
   setShowPanel,
   onViewMembers,
 }) {
+  const fileInputRef = useRef(null);
+
   if (!activeContact) {
     return (
       <Box
@@ -62,10 +69,8 @@ function ChatWindow({
 
   const isPendingRequest = activeRoom?.directStatus === "pending";
   const isRequestSender = activeRoom?.requestedById === currentUserId;
-  const requestAlreadySent =
-    messages.length > 0 || Boolean(activeRoom?.lastMessageAt);
-  const canSendFirstRequest =
-    isPendingRequest && isRequestSender && !requestAlreadySent;
+  const requestAlreadySent = messages.length > 0 || Boolean(activeRoom?.lastMessageAt);
+  const canSendFirstRequest = isPendingRequest && isRequestSender && !requestAlreadySent;
 
   return (
     <Box
@@ -77,7 +82,6 @@ function ChatWindow({
         minWidth: 0,
       }}
     >
-      {/* Header */}
       <Box
         sx={{
           px: 2,
@@ -129,21 +133,13 @@ function ChatWindow({
         </Box>
         {activeContact.isGroup && (
           <Tooltip title="View members">
-            <IconButton
-              size="small"
-              onClick={onViewMembers}
-              sx={{
-                color: "#64748b",
-                "&:hover": { color: "#1565C0", bgcolor: "#e3f2fd" },
-              }}
-            >
+            <IconButton size="small" onClick={onViewMembers}>
               <People fontSize="small" />
             </IconButton>
           </Tooltip>
         )}
       </Box>
 
-      {/* Messages */}
       <Box
         ref={messagesContainerRef}
         onScroll={onMessagesScroll}
@@ -157,12 +153,7 @@ function ChatWindow({
         {!loadingOlder && hasMoreOlder && (
           <Typography
             variant="caption"
-            sx={{
-              display: "block",
-              textAlign: "center",
-              color: "text.disabled",
-              py: 0.5,
-            }}
+            sx={{ display: "block", textAlign: "center", color: "text.disabled", py: 0.5 }}
           >
             Scroll up to load previous messages
           </Typography>
@@ -176,18 +167,13 @@ function ChatWindow({
             </Typography>
           </Box>
         ) : (
-          messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              onRetry={onRetryMessage}
-            />
+          messages.map((message) => (
+            <MessageBubble key={message.id} message={message} onRetry={onRetryMessage} />
           ))
         )}
         <div ref={messagesEndRef} />
       </Box>
 
-      {/* Accept or pending-request status */}
       {isPendingRequest && !isRequestSender ? (
         <Box
           sx={{
@@ -205,40 +191,38 @@ function ChatWindow({
           <Typography variant="body2" color="text.secondary">
             Accept this request to start the conversation.
           </Typography>
-          <Button
-            variant="contained"
-            onClick={onAcceptRequest}
-            sx={{ flexShrink: 0, textTransform: "none" }}
-          >
+          <Button variant="contained" onClick={onAcceptRequest} sx={{ flexShrink: 0, textTransform: "none" }}>
             Accept
           </Button>
         </Box>
       ) : isPendingRequest && !canSendFirstRequest ? (
-        <Box
-          sx={{
-            px: 2,
-            py: 1.5,
-            borderTop: "1px solid",
-            borderColor: "divider",
-            bgcolor: "background.paper",
-            textAlign: "center",
-          }}
-        >
+        <Box sx={{ px: 2, py: 1.5, borderTop: "1px solid", borderColor: "divider", bgcolor: "background.paper", textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
             Message request sent. Waiting for {activeContact.name} to accept.
           </Typography>
         </Box>
       ) : (
-        <Box
-          sx={{
-            px: 2,
-            py: 1.5,
-            borderTop: "1px solid",
-            borderColor: "divider",
-            bgcolor: "background.paper",
-          }}
-        >
+        <Box sx={{ px: 2, py: 1.5, borderTop: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
+          {sendError && <Alert severity="error" sx={{ mb: 1 }}>{sendError}</Alert>}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) onUploadFile?.(file);
+                event.target.value = "";
+              }}
+            />
+            <IconButton
+              aria-label="Attach image or PDF"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!activeRoom?.id || uploadingFile || sendingFirstMessage}
+            >
+              {uploadingFile ? <CircularProgress size={18} /> : <AttachFile fontSize="small" />}
+            </IconButton>
             <TextField
               fullWidth
               multiline
@@ -250,18 +234,14 @@ function ChatWindow({
                   : `Message ${activeContact.name}...`
               }
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  borderRadius: "12px",
-                  bgcolor: "#f8fafc",
-                },
-              }}
+              disabled={sendingFirstMessage || uploadingFile}
+              sx={{ "& .MuiOutlinedInput-root": { borderRadius: "12px", bgcolor: "#f8fafc" } }}
             />
             <IconButton
               onClick={handleSend}
-              disabled={!input.trim()}
+              disabled={!input.trim() || sendingFirstMessage || uploadingFile}
               sx={{
                 bgcolor: input.trim() ? "#1565C0" : "#e0e0e0",
                 color: input.trim() ? "#fff" : "#9e9e9e",
@@ -269,10 +249,9 @@ function ChatWindow({
                 height: 42,
                 flexShrink: 0,
                 "&:hover": { bgcolor: input.trim() ? "#0d47a1" : "#e0e0e0" },
-                transition: "all 0.15s",
               }}
             >
-              <Send fontSize="small" />
+              {sendingFirstMessage ? <CircularProgress size={18} color="inherit" /> : <Send fontSize="small" />}
             </IconButton>
           </Box>
         </Box>

@@ -1,16 +1,25 @@
 import { io } from 'socket.io-client'
 
 let socket = null
+let socketToken = null
 
 export function connectSocket(token) {
-  if (socket?.connected) return socket
+  const socketUrl =
+    import.meta.env.VITE_SOCKET_URL ||
+    (import.meta.env.DEV ? "http://localhost:5000" : "");
+  if (!socketUrl) {
+    console.error("VITE_SOCKET_URL must be configured for the Chat frontend");
+    return null;
+  }
+  if (socket?.connected && socketToken === token) return socket
   if (socket) {
     // Token may have changed — tear down the old connection first.
     socket.disconnect()
     socket = null
   }
+  socketToken = token
 
-  socket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000', {
+  socket = io(socketUrl, {
     autoConnect: true,
     auth: { token },
     // Automatic reconnection so dropped connections recover on their own.
@@ -32,6 +41,7 @@ export function disconnectSocket() {
   if (socket) {
     socket.disconnect()
     socket = null
+    socketToken = null
   }
 }
 

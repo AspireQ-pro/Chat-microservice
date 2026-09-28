@@ -14,8 +14,8 @@ This project is designed to be embedded into other applications. A parent/projec
 - Real-time messaging with Socket.IO.
 - Online user presence.
 - Message history persistence with PostgreSQL.
-- Basic read receipts.
-- File and image upload support.
+- Per-member read-through receipts for direct and group chats.
+- First-contact message requests that require recipient acceptance.
 - React chat UI with responsive mobile/desktop layout.
 - Docker Compose setup for database, backend, and frontend.
 
@@ -58,7 +58,6 @@ Chat-microservice/
 - Prisma ORM
 - PostgreSQL
 - JSON Web Tokens
-- Multer for uploads
 
 ### Frontend
 
@@ -94,10 +93,9 @@ Chat-microservice/
 The chat frontend publishes `chat:notification-count` updates to its opener (or
 parent frame) whenever unread messages or pending message requests change. The
 payload contains `unreadMessages`, `pendingRequests`, and `total`. The society
-application should listen for this event and use `total` for the chat portion
-of its existing notification badge. Since the society header is in the parent
-application, its listener must be added there; that app is not part of this
-repository.
+application listens for this event while the Chat iframe is open. Its dashboard
+header also maintains an authenticated Socket.IO connection and refreshes the
+same count when the iframe is closed.
 
 Set the optional frontend variable `VITE_SOCIETY_ORIGIN` to the society
 application's origin to restrict outgoing messages to that origin. The chat
@@ -123,14 +121,18 @@ window.addEventListener("message", (event) => {
 
 ### Backend
 
-| Variable          | Purpose                                        | Example                                                      |
-| ----------------- | ---------------------------------------------- | ------------------------------------------------------------ |
-| `DATABASE_URL`    | PostgreSQL connection string used by Prisma    | `postgresql://postgres:password@localhost:5433/chat_service` |
-| `CHAT_JWT_SECRET` | Secret used to sign and verify chat JWT tokens | `replace-with-a-long-random-secret`                          |
-| `PORT`            | Backend server port                            | `5000`                                                       |
-| `BACKEND_URL`     | Public backend URL used for upload links       | `http://localhost:5000`                                      |
+| Variable                      | Purpose                                                   | Example                                                           |
+| ----------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------- |
+| `DATABASE_URL`                | PostgreSQL connection string used by Prisma               | `postgresql://postgres:password@localhost:5433/chat_service`      |
+| `CHAT_JWT_SECRET`             | Stable, high-entropy secret used to sign/verify chat JWTs | Generate at least 32 random characters                            |
+| `MESSAGE_ENC_KEY`             | Separate, stable secret for message encryption at rest    | Generate independently; never rotate without a re-encryption plan |
+| `PROJECT_REGISTRATION_SECRET` | Secret required by `POST /api/projects`                   | Generate independently                                            |
+| `CHAT_FRONTEND_URL`           | Public Chat UI URL returned with session tokens           | `https://chat.example.com`                                        |
+| `CORS_ORIGIN`                 | Comma-separated Chat and Society HTTPS origins            | `https://chat.example.com,https://society.example.com`            |
+| `PORT`                        | Backend server port                                       | `5000`                                                            |
+| `BACKEND_URL`                 | Public backend URL used for upload links                  | `http://localhost:5000`                                           |
 
-Important: the backend code currently reads `CHAT_JWT_SECRET`. Make sure Docker and local env files use that exact variable name.
+Production startup fails if secrets, HTTPS URLs, or explicit CORS origins are missing. Do not use placeholder values. Copy the root `.env.example` to `.env`, fill it locally, and keep `.env` out of source control.
 
 ### Frontend
 
@@ -146,7 +148,7 @@ Important: the backend code currently reads `CHAT_JWT_SECRET`. Make sure Docker 
 
 ## Running With Docker Compose
 
-From the project root:
+From the project root, first configure every required value in `.env` (the example hostnames must be replaced with your actual HTTPS domains):
 
 ```bash
 docker compose up --build
@@ -158,7 +160,7 @@ Services:
 - Backend: `http://localhost:5000`
 - Frontend: `http://localhost:3001`
 
-The backend container runs Prisma migrations before starting:
+The backend container runs Prisma migrations before starting. **Do not deploy until the checked-in migration history has been reconciled with the actual database and a clean-database migration test passes.** The current target in `Backend/.env` returned `P1003: Database chatdb does not exist` during read-only status inspection, so production migration status and backup have not been verified.
 
 ```bash
 npx prisma migrate deploy && node index.js
@@ -244,6 +246,7 @@ Returns:
 
 ```http
 POST /api/projects
+X-REGISTRATION-SECRET: project-registration-secret
 Content-Type: application/json
 ```
 
@@ -316,7 +319,7 @@ Authorization: Bearer jwt-chat-token
 
 Returns direct and group rooms for the user.
 
-### Create Or Get Direct Room
+### Look Up An Existing Direct Room
 
 ```http
 POST /rooms/direct
@@ -333,7 +336,21 @@ Body:
 }
 ```
 
-Returns an existing or newly created one-to-one room.
+Returns an existing room. It does not create an empty room; an absent conversation returns 404.
+
+### Send The First Direct Message
+
+Contact selection is local-only. The first message creates the room, stores the opening message, and notifies the recipient in one transaction:
+
+```http
+POST /api/rooms/direct/request
+Authorization: Bearer jwt-chat-token
+Content-Type: application/json
+```
+
+```json
+{ "userId2": "other-user-id", "content": "Hello" }
+```
 
 ### Create Group Room
 
@@ -348,12 +365,11 @@ Body:
 ```json
 {
   "name": "Block A Residents",
-  "creatorId": "current-user-id",
   "memberIds": ["user-id-1", "user-id-2"]
 }
 ```
 
-Returns the created group room.
+The creator is always taken from the authenticated JWT. All group members receive a `group_created` socket event.
 
 ### Get Room Details
 
@@ -385,33 +401,23 @@ Body:
 
 ```json
 {
-  "roomId": "room-id",
-  "userId": "current-user-id"
+  "roomId": "room-id"
 }
 ```
 
-### Upload File
+Group read state is tracked using each member's `lastReadAt`; message responses include `readBy` and `recipientCount` derived from those read-through timestamps.
+
+### Upload An Attachment
+
+Uploads are limited to 10 MiB and JPEG, PNG, GIF, WebP, or PDF. The caller must be a member of the room. The returned URL is private and requires the same Chat JWT when loaded.
 
 ```http
-POST /upload
+POST /api/rooms/:roomId/upload
 Authorization: Bearer jwt-chat-token
 Content-Type: multipart/form-data
 ```
 
-Form field:
-
-```text
-file
-```
-
-Returns:
-
-```json
-{
-  "fileUrl": "http://localhost:5000/uploads/file-name",
-  "fileType": "image"
-}
-```
+Form field: `file`. Images render in the conversation; PDFs open in a new tab.
 
 ## Socket.IO Events
 
@@ -581,30 +587,31 @@ npm run preview
 
 ## Current Known Issues
 
-- Prisma migrations appear to be older than the current Prisma schema. Fresh deployments should be checked carefully.
-- `docker-compose.yml` uses `CHAT_JWT_SECRET`, matching the backend.
-- Frontend upload requests should include the bearer token because `/upload` is authenticated.
-- Several backend routes and socket events trust user IDs supplied by the client. They should use the authenticated JWT user ID instead.
-- Socket room joins and message sends should verify room membership.
-- File uploads do not currently enforce size limits or MIME allowlists.
-- Uploaded file URLs are currently generated with `localhost` instead of the configured public backend URL.
-- Project registration is public and should be protected before production use.
+- The migration chain does not create the current `Project`/`ChatUser` schema; fresh database deployment remains blocked pending reconciliation with the actual database and a clean-database test.
+- The production database target in `Backend/.env` currently reports `P1003: Database chatdb does not exist`; no production backup or migration was attempted.
 - There is no automated test suite yet.
+- Existing `Message.isRead` remains as a legacy direct-chat compatibility field; group read state and group read receipts use `ChatRoomMember.lastReadAt`.
+- Single attachments are supported through the authenticated room upload route; production deployments should move files to private object storage and add malware scanning/retention policy.
 
 ## Production Recommendations
 
-- Store secrets in environment variables or a secret manager.
-- Use a strong stable `CHAT_JWT_SECRET`.
-- Protect project registration with admin authentication.
-- Restrict CORS origins instead of using `origin: "*"`.
-- Add file size limits and file type validation.
-- Store uploads in object storage for production deployments.
+- Store `CHAT_JWT_SECRET`, `MESSAGE_ENC_KEY`, database credentials, and `PROJECT_REGISTRATION_SECRET` in a secret manager.
+- Keep the encryption key stable; changing it makes existing encrypted rows unreadable without re-encryption.
+- Back up the actual production DB and reconcile migrations before any deploy.
+- Use only public HTTPS URLs and allowlisted HTTPS CORS origins.
+- Store uploads in private object storage and add malware scanning/retention policy for production deployments.
 - Add API rate limiting.
 - Add request validation for all routes.
 - Add structured logging.
 - Add backend integration tests for auth, tenancy, rooms, messages, and uploads.
 - Add frontend tests for major chat flows.
 - Add CI checks for linting, builds, Prisma validation, and tests.
+
+### Project registration
+
+`POST /api/projects` requires the `X-REGISTRATION-SECRET` header. Configure
+`PROJECT_REGISTRATION_SECRET` on the backend and never expose it in a production
+browser. The `/register` page is available only in development.
 
 ## License
 
