@@ -1,7 +1,6 @@
 FROM node:20-alpine
 
 WORKDIR /app
-ENV NODE_ENV=production
 
 # Install all deps (including devDeps for prisma CLI + tsx)
 COPY package*.json ./
