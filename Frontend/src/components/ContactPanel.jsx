@@ -14,6 +14,7 @@ import {
 import { Search, GroupAdd } from "@mui/icons-material";
 import ContactItem from "./ContactItem";
 import GroupItem from "./GroupItem";
+import { useSelector } from "react-redux";
 
 function ContactPanel({
   isMobile,
@@ -30,7 +31,9 @@ function ContactPanel({
   activeRoomId,
   openGroupDialog,
 }) {
-  const [activeTab, setActiveTab] = useState(0);
+  const plan = useSelector((s) => s.auth.user?.plan) || 'premium';
+  const isPremium = plan === 'premium';
+  const [activeTab, setActiveTab] = useState(isPremium ? 0 : 1);
   const groupRooms = rooms
     .filter((room) => room.isGroup)
     .slice()
@@ -90,7 +93,7 @@ function ContactPanel({
         />
       </Box>
 
-      {/* Tabs */}
+      {/* Tabs — People tab hidden for basic plan */}
       <Box
         sx={{
           borderBottom: "1px solid",
@@ -115,24 +118,26 @@ function ContactPanel({
             "& .Mui-selected": { color: "#1565C0" },
           }}
         >
-          <Tab
-            label={
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                People
-                <Chip
-                  label={filteredContacts.length}
-                  size="small"
-                  sx={{
-                    height: 18,
-                    fontSize: "0.65rem",
-                    minWidth: 24,
-                    bgcolor: activeTab === 0 ? "#e3f2fd" : "#f5f5f5",
-                    color: activeTab === 0 ? "#1565C0" : "text.secondary",
-                  }}
-                />
-              </Box>
-            }
-          />
+          {isPremium && (
+            <Tab
+              label={
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                  People
+                  <Chip
+                    label={filteredContacts.length}
+                    size="small"
+                    sx={{
+                      height: 18,
+                      fontSize: "0.65rem",
+                      minWidth: 24,
+                      bgcolor: activeTab === 0 ? "#e3f2fd" : "#f5f5f5",
+                      color: activeTab === 0 ? "#1565C0" : "text.secondary",
+                    }}
+                  />
+                </Box>
+              }
+            />
+          )}
           <Tab
             label={
               <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
@@ -144,8 +149,8 @@ function ContactPanel({
                     height: 18,
                     fontSize: "0.65rem",
                     minWidth: 24,
-                    bgcolor: activeTab === 1 ? "#ede7f6" : "#f5f5f5",
-                    color: activeTab === 1 ? "#5e35b1" : "text.secondary",
+                    bgcolor: activeTab === (isPremium ? 1 : 0) ? "#ede7f6" : "#f5f5f5",
+                    color: activeTab === (isPremium ? 1 : 0) ? "#5e35b1" : "text.secondary",
                   }}
                 />
               </Box>
@@ -154,7 +159,7 @@ function ContactPanel({
         </Tabs>
 
         {/* Create group button — only visible on Groups tab */}
-        {activeTab === 1 && (
+        {activeTab === (isPremium ? 1 : 0) && (
           <Tooltip title="Create group">
             <IconButton
               size="small"
@@ -173,7 +178,7 @@ function ContactPanel({
 
       {/* Content */}
       <Box sx={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {activeTab === 0 ? (
+        {activeTab === 0 && isPremium ? (
           /* ── People tab ── */
           <List disablePadding>
             {filteredContacts.length === 0 ? (

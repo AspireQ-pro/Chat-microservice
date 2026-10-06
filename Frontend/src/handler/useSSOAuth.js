@@ -55,6 +55,7 @@ export function useSSOAuth() {
         id: decoded?.userId,
         name: decoded?.name,
         email: decoded?.email,
+        plan: decoded?.plan || 'premium',
       },
     }))
   }, [dispatch, user, token])
@@ -80,6 +81,7 @@ export function useSSOAuth() {
           id: refreshedUser.userId,
           name: refreshedUser.name,
           email: refreshedUser.email,
+          plan: refreshedUser.plan || 'premium',
         },
       }))
     }

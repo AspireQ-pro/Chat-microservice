@@ -307,16 +307,18 @@ app.post(
       return sendError(res, 401, "Invalid project registration secret");
     }
 
-    const { name } = req.body;
+    const { name, plan } = req.body;
     if (!name) return sendError(res, 400, "Project name is required");
+    const resolvedPlan = plan === "basic" ? "basic" : "premium";
 
     const project = await prisma.project.create({
-      data: { name, apiKey: generateApiKey() },
+      data: { name, apiKey: generateApiKey(), plan: resolvedPlan },
     });
     res.status(201).json({
       id: project.id,
       name: project.name,
       apiKey: project.apiKey,
+      plan: project.plan,
     });
   }),
 );
@@ -373,6 +375,7 @@ app.post(
         projectId: req.project.id,
         name: chatUser.name,
         email: chatUser.email,
+        plan: req.project.plan || "premium",
       },
       CHAT_JWT_SECRET,
       { expiresIn: "24h" },
@@ -383,6 +386,7 @@ app.post(
       token: chatToken,
       chatUrl: CHAT_FRONTEND_URL,
       projectId: req.project.id,
+      plan: req.project.plan || "premium",
       user: { id: chatUser.id, name: chatUser.name, email: chatUser.email },
     });
   }),
@@ -512,6 +516,8 @@ app.get(
 
 // Create or get direct 1-to-1 room
 app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
+  const project = await prisma.project.findUnique({ where: { id: req.projectId }, select: { plan: true } });
+  if (project?.plan === "basic") return sendError(res, 403, "Direct messaging is not available on the basic plan");
   // The current user is the authenticated JWT user, not a client-supplied id.
   const userId1 = req.userId;
   // Accept the other party from either field name for backwards compatibility.
@@ -563,6 +569,8 @@ app.post(
   `${API_BASE}/rooms/direct/request`,
   authenticateChatJWT,
   async (req, res) => {
+    const project = await prisma.project.findUnique({ where: { id: req.projectId }, select: { plan: true } });
+    if (project?.plan === "basic") return sendError(res, 403, "Direct messaging is not available on the basic plan");
     const senderId = req.userId;
     const userId2 = req.body?.userId2;
     const content = typeof req.body?.content === "string" ? req.body.content.trim() : "";

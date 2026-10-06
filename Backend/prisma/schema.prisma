@@ -10,6 +10,7 @@ model Project {
   id        String   @id @default(uuid())
   name      String
   apiKey    String   @unique
+  plan      String   @default("premium")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
