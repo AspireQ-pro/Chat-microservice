@@ -5,12 +5,16 @@ html,
 body,
 #root {
   height: 100%;
+  height: 100dvh;
   margin: 0;
   padding: 0;
 }
 
 body {
   overflow: hidden;
+  /* iOS safe areas */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 *,

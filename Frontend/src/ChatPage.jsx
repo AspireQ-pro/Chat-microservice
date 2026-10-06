@@ -108,6 +108,7 @@ function ChatPage() {
       sx={{
         display: "flex",
         height: "100%",
+        flex: 1,
         minHeight: 0,
         border: "1px solid",
         borderColor: "divider",
