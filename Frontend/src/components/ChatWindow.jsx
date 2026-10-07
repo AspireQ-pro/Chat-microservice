@@ -11,7 +11,13 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { AttachFile, ArrowBack, Circle, People, Send } from "@mui/icons-material";
+import arrowIcon from "@/assets/arrow.svg";
+import {
+  AttachFile,
+  Circle,
+  People,
+  Send,
+} from "@mui/icons-material";
 import MessageBubble from "./MessageBubble";
 
 function ChatWindow({
@@ -54,8 +60,8 @@ function ChatWindow({
           gap: 1,
         }}
       >
-        <Avatar sx={{ width: 64, height: 64, bgcolor: "#e3f2fd", mb: 1 }}>
-          <Send sx={{ color: "#1565C0", fontSize: 28 }} />
+        <Avatar sx={{ width: 64, height: 64, bgcolor: "rgba(60,79,74,0.1)", mb: 1 }}>
+          <Send sx={{ color: "#3C4F4A", fontSize: 28 }} />
         </Avatar>
         <Typography variant="h6" fontWeight={600}>
           Chat
@@ -82,38 +88,49 @@ function ChatWindow({
         minWidth: 0,
       }}
     >
+      {/* Chat header */}
       <Box
         sx={{
-          px: 2,
-          py: 1.5,
+          px: 1.5,
+          py: 1,
           borderBottom: "1px solid",
           borderColor: "divider",
           display: "flex",
           alignItems: "center",
-          gap: 1.5,
+          gap: 1,
           bgcolor: "background.paper",
+          minHeight: 56,
         }}
       >
+        {/* Back arrow — mobile only */}
         {isMobile && (
-          <IconButton size="small" onClick={() => setShowPanel(true)}>
-            <ArrowBack fontSize="small" />
+          <IconButton
+            size="small"
+            onClick={() => setShowPanel(true)}
+            sx={{ p: 0, minWidth: 0, display: { xs: "inline-flex", md: "none" } }}
+          >
+            <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
           </IconButton>
         )}
+
+        {/* Avatar */}
         <Badge
           overlap="circular"
           anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
           badgeContent={
-            <Circle
-              sx={{
-                fontSize: 10,
-                color: activeContact.online ? "#4caf50" : "#bdbdbd",
-              }}
-            />
+            !activeContact.isGroup ? (
+              <Circle
+                sx={{
+                  fontSize: 10,
+                  color: activeContact.online ? "#4caf50" : "#bdbdbd",
+                }}
+              />
+            ) : null
           }
         >
           <Avatar
             sx={{
-              bgcolor: activeContact.isGroup ? "#7e57c2" : "#1565C0",
+              bgcolor: activeContact.isGroup ? "#7e57c2" : "#3C4F4A",
               width: 38,
               height: 38,
               fontSize: "0.8rem",
@@ -123,21 +140,27 @@ function ChatWindow({
             {activeContact.avatar}
           </Avatar>
         </Badge>
-        <Box sx={{ flex: 1 }}>
-          <Typography variant="body1" fontWeight={600}>
+
+        {/* Name + status */}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="body2" fontWeight={700} noWrap>
             {activeContact.name}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
             {headerStatus}
           </Typography>
         </Box>
-        {activeContact.isGroup && (
-          <Tooltip title="View members">
-            <IconButton size="small" onClick={onViewMembers}>
-              <People fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        )}
+
+        {/* Action icons */}
+        <Box sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+          {activeContact.isGroup && (
+            <Tooltip title="View members">
+              <IconButton size="small" sx={{ color: "text.secondary" }} onClick={onViewMembers}>
+                <People fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
       </Box>
 
       <Box
@@ -243,12 +266,12 @@ function ChatWindow({
               onClick={handleSend}
               disabled={!input.trim() || sendingFirstMessage || uploadingFile}
               sx={{
-                bgcolor: input.trim() ? "#1565C0" : "#e0e0e0",
+                bgcolor: input.trim() ? "#3C4F4A" : "#e0e0e0",
                 color: input.trim() ? "#fff" : "#9e9e9e",
                 width: 42,
                 height: 42,
                 flexShrink: 0,
-                "&:hover": { bgcolor: input.trim() ? "#0d47a1" : "#e0e0e0" },
+                "&:hover": { bgcolor: input.trim() ? "#2a3834" : "#e0e0e0" },
               }}
             >
               {sendingFirstMessage ? <CircularProgress size={18} color="inherit" /> : <Send fontSize="small" />}

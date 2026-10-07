@@ -1,65 +1,136 @@
-import React from 'react'
-import {
-  Box, Typography, Avatar,
-  ListItem, ListItemAvatar, ListItemText, Divider,
-} from '@mui/material'
+import React from "react";
+import { Box, Typography, Avatar } from "@mui/material";
 
-function GroupItem({ room, active, unread = 0, onClick }) {
-  const avatar = room.name?.slice(0, 2).toUpperCase() || 'GR'
-  return (
-    <>
-      <ListItem
-        onClick={onClick}
-        sx={{
-          bgcolor: active || unread ? 'rgba(21,101,192,0.06)' : 'transparent',
-          borderLeft: active || unread ? '3px solid #1565C0' : '3px solid transparent',
-          cursor: 'pointer',
-          '&:hover': { bgcolor: 'rgba(0,0,0,0.04)' },
-          transition: 'all 0.15s',
-        }}
-      >
-        <ListItemAvatar>
-          <Avatar
-            sx={{
-              bgcolor: active || unread ? '#1565C0' : '#7b68ee',
-              width: 42, height: 42,
-              fontSize: '0.8rem', fontWeight: 700,
-            }}
-          >
-            {avatar}
-          </Avatar>
-        </ListItemAvatar>
-        <ListItemText
-          primary={
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="body2" fontWeight={unread ? 700 : 500} noWrap sx={{ maxWidth: 130 }}>
-                {room.name}
-              </Typography>
-              {unread > 0 && (
-                <Box sx={{ bgcolor: '#1565C0', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 700 }}>{unread}</Typography>
-                </Box>
-              )}
-            </Box>
-          }
-          secondary={
-            <Typography
-              variant="caption"
-              noWrap
-              sx={{
-                display: 'block', mt: 0.2,
-                fontWeight: unread ? 700 : 400,
-                color: unread ? 'text.primary' : 'text.disabled',
-              }}
-            >
-              {room.lastMessagePreview || `${room.members?.length ?? 0} members`}
-            </Typography>
-          }
-        />
-      </ListItem>
-      <Divider variant="inset" component="li" />
-    </>
-  )
+function formatTime(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d)) return "";
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-export default GroupItem
+function GroupItem({ room, active, unread = 0, onClick }) {
+  const avatar = room.name?.slice(0, 2).toUpperCase() || "GR";
+  const timeLabel = formatTime(room.lastMessageAt || room.createdAt);
+
+  return (
+    <Box
+      onClick={onClick}
+      sx={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        width: "100%",
+        minHeight: 73,
+        px: "12px",
+        py: "12px",
+        gap: "12px",
+        borderBottom: "1px solid #D5D9D8",
+        bgcolor: active ? "rgba(60,79,74,0.06)" : "transparent",
+        borderLeft: active ? "3px solid #3C4F4A" : "3px solid transparent",
+        cursor: "pointer",
+        boxSizing: "border-box",
+        "&:hover": { bgcolor: "rgba(0,0,0,0.04)" },
+        transition: "background 0.15s",
+      }}
+    >
+      {/* Avatar */}
+      <Avatar
+        sx={{
+          bgcolor: active ? "#3C4F4A" : "#7b68ee",
+          width: 46,
+          height: 46,
+          fontSize: "0.8rem",
+          fontWeight: 700,
+          flexShrink: 0,
+        }}
+      >
+        {avatar}
+      </Avatar>
+
+      {/* Text block */}
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        {/* Row 1: name + timestamp */}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: "2px",
+          }}
+        >
+          <Typography
+            noWrap
+            sx={{
+              flex: 1,
+              mr: 1,
+              fontWeight: unread ? 700 : 600,
+              fontSize: "0.9rem",
+              lineHeight: 1.3,
+              color: "text.primary",
+            }}
+          >
+            {room.name}
+          </Typography>
+          <Typography
+            sx={{
+              flexShrink: 0,
+              fontSize: "0.72rem",
+              fontWeight: unread ? 600 : 400,
+              color: unread ? "#3C4F4A" : "text.disabled",
+              lineHeight: 1.3,
+            }}
+          >
+            {timeLabel}
+          </Typography>
+        </Box>
+
+        {/* Row 2: last message + unread badge */}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <Typography
+            noWrap
+            sx={{
+              flex: 1,
+              mr: 1,
+              fontSize: "0.8rem",
+              fontWeight: unread ? 600 : 400,
+              color: unread ? "text.primary" : "text.disabled",
+              lineHeight: 1.3,
+            }}
+          >
+            {room.lastMessagePreview || `${room.members?.length ?? 0} members`}
+          </Typography>
+          {unread > 0 && (
+            <Box
+              sx={{
+                bgcolor: "#3C4F4A",
+                color: "#fff",
+                borderRadius: "50%",
+                minWidth: 20,
+                height: 20,
+                px: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Typography
+                sx={{ fontSize: "0.65rem", fontWeight: 700, lineHeight: 1 }}
+              >
+                {unread}
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+export default GroupItem;
