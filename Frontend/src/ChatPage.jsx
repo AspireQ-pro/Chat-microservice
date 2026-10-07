@@ -71,6 +71,7 @@ function ChatPage() {
       handleSelectRoom={handleSelectRoom}
       activeRoomId={activeRoomId}
       openGroupDialog={openGroupDialog}
+      setShowPanel={setShowPanel}
     />
   );
 

@@ -6,7 +6,7 @@ import RegisterProject from '@/components/RegisterProject'
 
 const theme = createTheme({
   palette: {
-    primary: { main: '#1565C0' },
+    primary: { main: '#3C4F4A' },
     background: { default: '#f4f6fb' },
   },
   typography: {

@@ -4,14 +4,15 @@ import {
   Typography,
   TextField,
   List,
-  Tabs,
-  Tab,
   InputAdornment,
-  Chip,
-  Tooltip,
   IconButton,
+  Tooltip,
 } from "@mui/material";
-import { Search, GroupAdd } from "@mui/icons-material";
+import arrowIcon from "@/assets/arrow.svg";
+import {
+  Search,
+  GroupAdd,
+} from "@mui/icons-material";
 import ContactItem from "./ContactItem";
 import GroupItem from "./GroupItem";
 import { useSelector } from "react-redux";
@@ -30,15 +31,18 @@ function ContactPanel({
   handleSelectRoom,
   activeRoomId,
   openGroupDialog,
+  setShowPanel,
 }) {
-  const plan = useSelector((s) => s.auth.user?.plan) || 'premium';
-  const isPremium = plan === 'premium';
-  const [activeTab, setActiveTab] = useState(isPremium ? 0 : 1);
+  const plan = useSelector((s) => s.auth.user?.plan) || "premium";
+  const isPremium = plan === "premium";
+  const [activeTab, setActiveTab] = useState(0); // 0 = All Chats, 1 = Groups
+
   const groupRooms = rooms
     .filter((room) => room.isGroup)
     .slice()
     .sort((a, b) => {
-      const unreadDiff = (unreadCounts[b.id] || 0) - (unreadCounts[a.id] || 0);
+      const unreadDiff =
+        (unreadCounts[b.id] || 0) - (unreadCounts[a.id] || 0);
       if (unreadDiff) return unreadDiff;
       return (
         new Date(b.lastMessageAt || b.createdAt) -
@@ -59,127 +63,173 @@ function ContactPanel({
         bgcolor: "background.paper",
       }}
     >
+      {/* Title row — arrow + Chats */}
       <Box
         sx={{
-          px: 2,
-          pt: 2,
-          pb: 1.5,
-          borderBottom: "1px solid",
-          borderColor: "divider",
+          px: "16px",
+          pt: "20px",
+          pb: "20px",
+          borderBottom: "1px solid #D5D9D8",
+          bgcolor: "#FFFFFF",
+          display: "flex",
+          alignItems: "center",
+          gap: "24px",
         }}
       >
-        <Typography variant="h6" fontWeight={700} mb={1.5}>
-          Messages
+        {isMobile && (
+          <IconButton
+            size="small"
+            onClick={() => setShowPanel && setShowPanel(false)}
+            sx={{ p: 0, minWidth: 0, lineHeight: 1 }}
+          >
+            <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
+          </IconButton>
+        )}
+        <Typography
+          sx={{
+            fontFamily: "'Plus Jakarta Sans', sans-serif",
+            fontWeight: 500,
+            fontSize: "18px",
+            lineHeight: "100%",
+            letterSpacing: 0,
+            color: "#172A26",
+            flex: 1,
+          }}
+        >
+          Chats
         </Typography>
+      </Box>
+
+      {/* Search */}
+      <Box
+        sx={{
+          px: "16px",
+          py: "12px",
+          bgcolor: "#FFFFFF",
+        }}
+      >
         <TextField
           fullWidth
           size="small"
-          placeholder="Search people..."
+          placeholder="Search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           InputProps={{
             startAdornment: (
-              <InputAdornment position="start">
-                <Search fontSize="small" sx={{ color: "text.disabled" }} />
+              <InputAdornment position="start" sx={{ mr: 0 }}>
+                <Search sx={{ fontSize: 18, color: "text.disabled" }} />
               </InputAdornment>
             ),
           }}
           sx={{
             "& .MuiOutlinedInput-root": {
-              borderRadius: "10px",
-              bgcolor: "#f8fafc",
+              height: 48,
+              borderRadius: "8px",
+              bgcolor: "#fff",
+              gap: "10px",
+              "& fieldset": {
+                borderColor: "#E0E0E0",
+                borderWidth: "1px",
+              },
+              "&:hover fieldset": {
+                borderColor: "#BDBDBD",
+              },
+              "&.Mui-focused fieldset": {
+                borderColor: "#3C4F4A",
+                borderWidth: "1px",
+              },
+            },
+            "& .MuiOutlinedInput-input": {
+              padding: "14px 0",
+              fontSize: "0.875rem",
+            },
+            "& .MuiInputAdornment-positionStart": {
+              marginRight: 0,
             },
           }}
         />
       </Box>
 
-      {/* Tabs — People tab hidden for basic plan */}
+      {/* Pill Tabs */}
       <Box
         sx={{
+          px: 1.5,
+          py: 1,
           borderBottom: "1px solid",
           borderColor: "divider",
           display: "flex",
-          alignItems: "center",
+          gap: 1.5,
+          bgcolor: "background.paper",
         }}
       >
-        <Tabs
-          value={activeTab}
-          onChange={(e, newVal) => setActiveTab(newVal)}
+        {/* Tab container */}
+        <Box
           sx={{
+            display: "flex",
             flex: 1,
-            minHeight: 42,
-            "& .MuiTab-root": {
-              minHeight: 42,
-              textTransform: "none",
-              fontWeight: 600,
-              fontSize: "0.875rem",
-              flex: 1,
-            },
-            "& .Mui-selected": { color: "#1565C0" },
+            gap: "12px",
+            bgcolor: "#F5F5F5",
+            borderRadius: "8px",
+            p: "4px",
           }}
         >
           {isPremium && (
-            <Tab
-              label={
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                  People
-                  <Chip
-                    label={filteredContacts.length}
-                    size="small"
-                    sx={{
-                      height: 18,
-                      fontSize: "0.65rem",
-                      minWidth: 24,
-                      bgcolor: activeTab === 0 ? "#e3f2fd" : "#f5f5f5",
-                      color: activeTab === 0 ? "#1565C0" : "text.secondary",
-                    }}
-                  />
-                </Box>
-              }
-            />
-          )}
-          <Tab
-            label={
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                Groups
-                <Chip
-                  label={groupRooms.length}
-                  size="small"
-                  sx={{
-                    height: 18,
-                    fontSize: "0.65rem",
-                    minWidth: 24,
-                    bgcolor: activeTab === (isPremium ? 1 : 0) ? "#ede7f6" : "#f5f5f5",
-                    color: activeTab === (isPremium ? 1 : 0) ? "#5e35b1" : "text.secondary",
-                  }}
-                />
-              </Box>
-            }
-          />
-        </Tabs>
-
-        {/* Create group button — only visible on Groups tab */}
-        {activeTab === (isPremium ? 1 : 0) && (
-          <Tooltip title="Create group">
-            <IconButton
-              size="small"
-              onClick={openGroupDialog}
+            <Box
+              onClick={() => setActiveTab(0)}
               sx={{
-                mr: 1,
-                color: "#7b68ee",
-                "&:hover": { bgcolor: "#ede7f6", color: "#5e35b1" },
+                flex: 1,
+                textAlign: "center",
+                height: "42px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                px: "10px",
+                gap: "10px",
+                borderRadius: "8px",
+                cursor: "pointer",
+                bgcolor: activeTab === 0 ? "#3C4F4A" : "transparent",
+                color: activeTab === 0 ? "#fff" : "text.secondary",
+                border: activeTab === 0 ? "1px solid #1A312C" : "1px solid transparent",
+                fontWeight: 600,
+                fontSize: "0.85rem",
+                transition: "background 0.2s, color 0.2s, border-color 0.2s",
+                userSelect: "none",
               }}
             >
-              <GroupAdd fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        )}
+              All Chats
+            </Box>
+          )}
+          <Box
+            onClick={() => setActiveTab(isPremium ? 1 : 0)}
+            sx={{
+              flex: 1,
+              textAlign: "center",
+              height: "42px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              px: "10px",
+              gap: "10px",
+              borderRadius: "8px",
+              cursor: "pointer",
+              bgcolor: activeTab === (isPremium ? 1 : 0) ? "#3C4F4A" : "transparent",
+              color: activeTab === (isPremium ? 1 : 0) ? "#fff" : "text.secondary",
+              border: activeTab === (isPremium ? 1 : 0) ? "1px solid #1A312C" : "1px solid transparent",
+              fontWeight: 600,
+              fontSize: "0.85rem",
+              transition: "background 0.2s, color 0.2s, border-color 0.2s",
+              userSelect: "none",
+            }}
+          >
+            Groups
+          </Box>
+        </Box>
       </Box>
 
       {/* Content */}
       <Box sx={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {activeTab === 0 && isPremium ? (
-          /* ── People tab ── */
+        {(activeTab === 0 && isPremium) ? (
+          /* ── All Chats tab ── */
           <List disablePadding>
             {filteredContacts.length === 0 ? (
               <Box sx={{ px: 2, py: 4, textAlign: "center" }}>
@@ -202,32 +252,70 @@ function ContactPanel({
           </List>
         ) : (
           /* ── Groups tab ── */
-          <List disablePadding>
-            {groupRooms.length === 0 ? (
-              <Box sx={{ px: 2, py: 4, textAlign: "center" }}>
-                <Typography variant="body2" color="text.disabled">
-                  No groups yet
-                </Typography>
-                <Typography
-                  variant="caption"
-                  color="text.disabled"
-                  sx={{ display: "block", mt: 0.5 }}
+          <>
+            {/* Groups section header with add button */}
+            <Box
+              sx={{
+                px: 2,
+                py: 1.25,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <Typography
+                sx={{
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontWeight: 500,
+                  fontSize: "16px",
+                  lineHeight: "100%",
+                  letterSpacing: 0,
+                  color: "text.primary",
+                }}
+              >
+                Groups
+              </Typography>
+              <Tooltip title="Create group">
+                <IconButton
+                  size="small"
+                  onClick={openGroupDialog}
+                  sx={{
+                    color: "#3C4F4A",
+                    "&:hover": { bgcolor: "#e8edec" },
+                  }}
                 >
-                  Use the + button above to create one
-                </Typography>
-              </Box>
-            ) : (
-              groupRooms.map((room) => (
-                <GroupItem
-                  key={room.id}
-                  room={room}
-                  active={room.id === activeRoomId}
-                  unread={unreadCounts[room.id] || 0}
-                  onClick={() => handleSelectRoom(room)}
-                />
-              ))
-            )}
-          </List>
+                  <GroupAdd fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+
+            <List disablePadding>
+              {groupRooms.length === 0 ? (
+                <Box sx={{ px: 2, py: 3, textAlign: "center" }}>
+                  <Typography variant="body2" color="text.disabled">
+                    No groups yet
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.disabled"
+                    sx={{ display: "block", mt: 0.5 }}
+                  >
+                    Tap + to create one
+                  </Typography>
+                </Box>
+              ) : (
+                groupRooms.map((room) => (
+                  <GroupItem
+                    key={room.id}
+                    room={room}
+                    active={room.id === activeRoomId}
+                    unread={unreadCounts[room.id] || 0}
+                    onClick={() => handleSelectRoom(room)}
+                  />
+                ))
+              )}
+            </List>
+          </>
         )}
       </Box>
     </Box>

@@ -60,7 +60,7 @@ function MessageBubble({ message, onRetry }) {
         sx={{
           maxWidth: '65%', px: 2, py: 1,
           borderRadius: message.mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-          bgcolor: failed ? '#fdecea' : (message.mine ? '#1565C0' : '#f5f5f5'),
+          bgcolor: failed ? '#fdecea' : (message.mine ? '#3C4F4A' : '#f5f5f5'),
           color: failed ? '#b71c1c' : (message.mine ? '#fff' : 'text.primary'),
           border: failed ? '1px solid #f5c6cb' : 'none',
           boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
@@ -94,7 +94,7 @@ function MessageBubble({ message, onRetry }) {
             target="_blank"
             rel="noopener noreferrer"
             size="small"
-            sx={{ color: message.mine ? '#fff' : '#1565C0', textTransform: 'none', px: 0, minWidth: 0 }}
+            sx={{ color: message.mine ? '#fff' : '#3C4F4A', textTransform: 'none', px: 0, minWidth: 0 }}
           >
             📎 Open PDF
           </Button>
