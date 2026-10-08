@@ -58,12 +58,13 @@ function MessageBubble({ message, onRetry }) {
     >
       <Box
         sx={{
-          maxWidth: '65%', px: 2, py: 1,
+          maxWidth: '75%', px: message.fileType === 'image' ? 0.5 : 2, py: message.fileType === 'image' ? 0.5 : 1,
           borderRadius: message.mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
           bgcolor: failed ? '#fdecea' : (message.mine ? '#3C4F4A' : '#f5f5f5'),
           color: failed ? '#b71c1c' : (message.mine ? '#fff' : 'text.primary'),
           border: failed ? '1px solid #f5c6cb' : 'none',
           boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+          overflow: 'hidden',
         }}
       >
         {!message.mine && message.senderName && (
@@ -81,7 +82,18 @@ function MessageBubble({ message, onRetry }) {
               src={attachmentUrl}
               alt="Chat attachment"
               loading="lazy"
-              sx={{ display: 'block', maxWidth: 260, maxHeight: 260, borderRadius: 1, mt: message.text ? 1 : 0.25 }}
+              sx={{
+                display: 'block',
+                // 100% keeps the image inside the bubble on any screen width.
+                // The 260px cap still applies on larger screens.
+                width: '100%',
+                maxWidth: 260,
+                height: 'auto',
+                maxHeight: 260,
+                objectFit: 'cover',
+                borderRadius: 1,
+                mt: message.text ? 1 : 0.25,
+              }}
             />
           ) : (
             <Typography variant="caption">Loading image…</Typography>

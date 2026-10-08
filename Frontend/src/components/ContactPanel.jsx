@@ -176,6 +176,9 @@ function ContactPanel({
           {isPremium && (
             <Box
               onClick={() => setActiveTab(0)}
+              onTouchEnd={(e) => { e.preventDefault(); setActiveTab(0) }}
+              role="button"
+              tabIndex={0}
               sx={{
                 flex: 1,
                 textAlign: "center",
@@ -201,6 +204,9 @@ function ContactPanel({
           )}
           <Box
             onClick={() => setActiveTab(isPremium ? 1 : 0)}
+            onTouchEnd={(e) => { e.preventDefault(); setActiveTab(isPremium ? 1 : 0) }}
+            role="button"
+            tabIndex={0}
             sx={{
               flex: 1,
               textAlign: "center",

@@ -15,6 +15,10 @@ function ContactItem({ contact, active, lastMessage, unread, onClick }) {
   return (
     <Box
       onClick={onClick}
+      onTouchEnd={(e) => { e.preventDefault(); onClick?.() }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.() }}
       sx={{
         display: "flex",
         flexDirection: "row",
