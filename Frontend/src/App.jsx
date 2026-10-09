@@ -44,7 +44,16 @@ function AppContent() {
   if (error) return <ErrorScreen message={error} />
   if (!user) return <ErrorScreen message="No session found." />
 
-  return <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}><ChatPage /></Box>
+  return (
+    <Box sx={{
+      height: 'var(--app-height, 100dvh)',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <ChatPage />
+    </Box>
+  )
 }
 
 export default function App() {
