@@ -80,7 +80,13 @@ function findDirectRoom(rooms, contactId, currentUserId) {
 export function useChatHandler() {
   const dispatch = useDispatch();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  // useMediaQuery reads window.innerWidth of the iframe's own window, which is
+  // correct when embedded. However, the breakpoint threshold must match what
+  // ContactPanel / ChatWindow consider "mobile" layout — anything narrower than
+  // the panel (300px) + a minimum chat window width (~340px) = ~640px.
+  // Using "sm" (600px) instead of "md" (900px) so a narrow iframe is treated
+  // as mobile even when the outer page is wide.
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   const currentUser = useSelector((s) => s.auth.user);
   const authToken = useSelector((s) => s.auth.token);

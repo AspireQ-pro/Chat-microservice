@@ -107,7 +107,7 @@ function ChatWindow({
           <IconButton
             size="small"
             onClick={() => setShowPanel(true)}
-            sx={{ p: 0, minWidth: 0, display: { xs: "inline-flex", md: "none" } }}
+            sx={{ p: 0, minWidth: 0 }}
           >
             <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
           </IconButton>
