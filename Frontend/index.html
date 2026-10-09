@@ -7,6 +7,27 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --app-height: 100%;
+      }
+    </style>
+    <script>
+      (function () {
+        function setAppHeight() {
+          var h = window.innerHeight;
+          if (h && h > 0) {
+            document.documentElement.style.setProperty("--app-height", h + "px");
+          }
+        }
+        setAppHeight();
+        window.addEventListener("resize", setAppHeight);
+        window.addEventListener("orientationchange", function () {
+          setTimeout(setAppHeight, 100);
+        });
+        document.addEventListener("DOMContentLoaded", setAppHeight);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

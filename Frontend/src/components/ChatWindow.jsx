@@ -86,6 +86,7 @@ function ChatWindow({
         flexDirection: "column",
         minHeight: 0,
         minWidth: 0,
+        height: "100%",
       }}
     >
       {/* Chat header */}
@@ -166,7 +167,7 @@ function ChatWindow({
       <Box
         ref={messagesContainerRef}
         onScroll={onMessagesScroll}
-        sx={{ flexGrow: 1, overflowY: "auto", py: 2, bgcolor: "#fafafa" }}
+        sx={{ flex: 1, minHeight: 0, overflowY: "auto", py: 2, bgcolor: "#fafafa" }}
       >
         {loadingOlder && (
           <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}>
