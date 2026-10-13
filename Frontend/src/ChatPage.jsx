@@ -111,8 +111,7 @@ function ChatPage() {
         height: "100%",
         flex: 1,
         minHeight: 0,
-        border: { xs: "none", sm: "1px solid" },
-        borderColor: "divider",
+        border: "none",
         borderRadius: 0,
         overflow: "hidden",
       }}
