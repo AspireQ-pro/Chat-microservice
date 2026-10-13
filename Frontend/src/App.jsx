@@ -17,7 +17,7 @@ const theme = createTheme({
 function LoadingScreen() {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', height: '100vh', gap: 2 }}>
+      justifyContent: 'center', height: '100%', gap: 2 }}>
       <CircularProgress size={40} sx={{ color: '#1565C0' }} />
       <Typography variant="body2" color="text.secondary">Signing you in…</Typography>
     </Box>
@@ -27,7 +27,7 @@ function LoadingScreen() {
 function ErrorScreen({ message }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', height: '100vh', gap: 1, px: 3, textAlign: 'center' }}>
+      justifyContent: 'center', height: '100%', gap: 1, px: 3, textAlign: 'center' }}>
       <Typography variant="h6" color="error" fontWeight={600}>Unable to sign in</Typography>
       <Typography variant="body2" color="text.secondary">{message}</Typography>
       <Typography variant="caption" color="text.disabled" sx={{ mt: 1 }}>
@@ -46,7 +46,11 @@ function AppContent() {
 
   return (
     <Box sx={{
-      height: 'var(--app-height, 100dvh)',
+      // Use 100% so the chat fills whatever height the iframe gives it.
+      // 100dvh / 100vh would refer to the iframe's own viewport height, which
+      // behaves inconsistently in Safari and causes panel overlap when embedded.
+      height: '100%',
+      maxHeight: '100%',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',

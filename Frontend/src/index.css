@@ -1,11 +1,13 @@
 /* Fit the app to the screen (or the iframe it is embedded in) exactly — no
    page scroll, no extra height. The chat's own panels handle their own
-   scrolling internally. */
+   scrolling internally.
+   Use height:100% (not 100dvh) so that when embedded in an iframe the root
+   fills the iframe's assigned height rather than computing its own viewport
+   height — 100dvh inside an iframe is unreliable on Safari and causes overlap. */
 html,
 body,
 #root {
   height: 100%;
-  height: 100dvh;
   margin: 0;
   padding: 0;
 }
