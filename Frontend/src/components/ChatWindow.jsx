@@ -58,8 +58,20 @@ function ChatWindow({
           justifyContent: "center",
           bgcolor: "#fafafa",
           gap: 1,
+          position: "relative",
         }}
       >
+        {isMobile && (
+          <Box sx={{ position: "absolute", top: 12, left: 12 }}>
+            <IconButton
+              size="small"
+              onClick={() => setShowPanel(true)}
+              sx={{ p: 1, minWidth: 40, minHeight: 40 }}
+            >
+              <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
+            </IconButton>
+          </Box>
+        )}
         <Avatar sx={{ width: 64, height: 64, bgcolor: "rgba(60,79,74,0.1)", mb: 1 }}>
           <Send sx={{ color: "#3C4F4A", fontSize: 28 }} />
         </Avatar>
@@ -108,7 +120,7 @@ function ChatWindow({
           <IconButton
             size="small"
             onClick={() => setShowPanel(true)}
-            sx={{ p: 0, minWidth: 0 }}
+            sx={{ p: 1, minWidth: 40, minHeight: 40, mr: 0.5 }}
           >
             <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
           </IconButton>

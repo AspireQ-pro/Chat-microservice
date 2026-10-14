@@ -15,7 +15,6 @@ function GroupItem({ room, active, unread = 0, onClick }) {
   return (
     <Box
       onClick={onClick}
-      onTouchEnd={(e) => { e.preventDefault(); onClick?.() }}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.() }}

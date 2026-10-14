@@ -46,10 +46,6 @@ function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, h
           <IconButton
             size="small"
             onClick={openGroupDialog}
-            onTouchEnd={(e) => {
-              e.preventDefault();
-              openGroupDialog();
-            }}
             sx={{
               color: "#3C4F4A",
               "&:hover": { bgcolor: "#e8edec" },
@@ -162,7 +158,7 @@ function ContactPanel({
                 setShowPanel && setShowPanel(false)
               }
             }}
-            sx={{ p: 0, minWidth: 0, lineHeight: 1 }}
+            sx={{ p: 1, minWidth: 36, minHeight: 36, lineHeight: 1 }}
           >
             <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
           </IconButton>
@@ -258,7 +254,6 @@ function ContactPanel({
           >
             <Box
               onClick={() => setActiveTab(0)}
-              onTouchEnd={(e) => { e.preventDefault(); setActiveTab(0) }}
               role="button"
               tabIndex={0}
               sx={{
@@ -285,7 +280,6 @@ function ContactPanel({
             </Box>
             <Box
               onClick={() => setActiveTab(1)}
-              onTouchEnd={(e) => { e.preventDefault(); setActiveTab(1) }}
               role="button"
               tabIndex={0}
               sx={{
