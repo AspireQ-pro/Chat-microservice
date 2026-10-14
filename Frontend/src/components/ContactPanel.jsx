@@ -42,10 +42,14 @@ function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, h
         >
           Groups
         </Typography>
-        <Tooltip title="Create group">
+        <Tooltip title="Create group" disableTouchListener>
           <IconButton
             size="small"
             onClick={openGroupDialog}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              openGroupDialog();
+            }}
             sx={{
               color: "#3C4F4A",
               "&:hover": { bgcolor: "#e8edec" },
