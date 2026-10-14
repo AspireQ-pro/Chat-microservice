@@ -111,6 +111,7 @@ function ChatPage() {
         height: "100%",
         flex: 1,
         minHeight: 0,
+        maxHeight: "100%",
         border: "none",
         borderRadius: 0,
         overflow: "hidden",
