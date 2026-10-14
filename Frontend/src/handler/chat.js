@@ -86,7 +86,7 @@ export function useChatHandler() {
   // the panel (300px) + a minimum chat window width (~340px) = ~640px.
   // Using "sm" (600px) instead of "md" (900px) so a narrow iframe is treated
   // as mobile even when the outer page is wide.
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
   const currentUser = useSelector((s) => s.auth.user);
   const authToken = useSelector((s) => s.auth.token);
