@@ -274,10 +274,111 @@ function authenticateChatJWT(req, res, next) {
     const payload = jwt.verify(token, CHAT_JWT_SECRET);
     req.userId = payload.userId;
     req.projectId = payload.projectId;
+    req.plan = payload.plan;
+    req.allowGroupChat = payload.allowGroupChat;
+    req.allowDirectChat = payload.allowDirectChat;
     next();
   } catch {
     res.status(401).json({ error: "Invalid or expired token" });
   }
+}
+
+function parseFeatureFlag(val) {
+  if (typeof val === "boolean") return val;
+  if (val === "true") return true;
+  if (val === "false") return false;
+  return undefined;
+}
+
+// ─── Resolve Plan & Chat Capabilities ──────────────────────────────────────
+function resolveChatCapabilities(body = {}, existingProject = null) {
+  let allowGroup;
+  if (body.allowGroupChat !== undefined) {
+    allowGroup = parseFeatureFlag(body.allowGroupChat);
+  } else if (body.groupChat !== undefined) {
+    allowGroup = parseFeatureFlag(body.groupChat);
+  }
+
+  let allowDirect;
+  if (body.allowDirectChat !== undefined) {
+    allowDirect = parseFeatureFlag(body.allowDirectChat);
+  } else if (body.allowOneToOneChat !== undefined) {
+    allowDirect = parseFeatureFlag(body.allowOneToOneChat);
+  } else if (body.directChat !== undefined) {
+    allowDirect = parseFeatureFlag(body.directChat);
+  } else if (body.oneToOneChat !== undefined) {
+    allowDirect = parseFeatureFlag(body.oneToOneChat);
+  }
+
+  // If plan is provided as an object containing explicit flags
+  if (typeof body.plan === "object" && body.plan !== null) {
+    if (allowGroup === undefined) {
+      if (body.plan.allowGroupChat !== undefined) allowGroup = parseFeatureFlag(body.plan.allowGroupChat);
+      else if (body.plan.groupChat !== undefined) allowGroup = parseFeatureFlag(body.plan.groupChat);
+    }
+    if (allowDirect === undefined) {
+      if (body.plan.allowDirectChat !== undefined) allowDirect = parseFeatureFlag(body.plan.allowDirectChat);
+      else if (body.plan.allowOneToOneChat !== undefined) allowDirect = parseFeatureFlag(body.plan.allowOneToOneChat);
+      else if (body.plan.directChat !== undefined) allowDirect = parseFeatureFlag(body.plan.directChat);
+      else if (body.plan.oneToOneChat !== undefined) allowDirect = parseFeatureFlag(body.plan.oneToOneChat);
+    }
+  }
+
+  // Fallback to existing project configuration if available
+  if (allowGroup === undefined && existingProject?.allowGroupChat !== undefined) {
+    allowGroup = parseFeatureFlag(existingProject.allowGroupChat);
+  }
+  if (allowDirect === undefined && existingProject?.allowDirectChat !== undefined) {
+    allowDirect = parseFeatureFlag(existingProject.allowDirectChat);
+  }
+
+  // Plan name is metadata only — it never determines feature availability
+  const planName =
+    typeof body.plan === "string" && body.plan.trim()
+      ? body.plan.trim()
+      : (existingProject?.plan || "custom");
+
+  // If configuration is missing or invalid, do not automatically enable either feature.
+  if (allowGroup === undefined) {
+    allowGroup = false;
+  }
+  if (allowDirect === undefined) {
+    allowDirect = false;
+  }
+
+  return {
+    plan: planName,
+    allowGroupChat: Boolean(allowGroup),
+    allowDirectChat: Boolean(allowDirect),
+  };
+}
+
+async function getProjectPermissions(projectId, reqOrSocket = {}) {
+  let allowDirect;
+  let allowGroup;
+
+  if (projectId) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { allowDirectChat: true, allowGroupChat: true },
+    });
+    if (project) {
+      allowDirect = parseFeatureFlag(project.allowDirectChat);
+      allowGroup = parseFeatureFlag(project.allowGroupChat);
+    }
+  }
+
+  if (allowDirect === undefined) {
+    allowDirect = parseFeatureFlag(reqOrSocket.allowDirectChat);
+  }
+  if (allowGroup === undefined) {
+    allowGroup = parseFeatureFlag(reqOrSocket.allowGroupChat);
+  }
+
+  return {
+    allowDirectChat: Boolean(allowDirect),
+    allowGroupChat: Boolean(allowGroup),
+  };
 }
 
 // ─── Health ────────────────────────────────────────────────────────────────
@@ -307,18 +408,26 @@ app.post(
       return sendError(res, 401, "Invalid project registration secret");
     }
 
-    const { name, plan } = req.body;
+    const { name } = req.body;
     if (!name) return sendError(res, 400, "Project name is required");
-    const resolvedPlan = plan === "basic" ? "basic" : "premium";
+    const capabilities = resolveChatCapabilities(req.body);
 
     const project = await prisma.project.create({
-      data: { name, apiKey: generateApiKey(), plan: resolvedPlan },
+      data: {
+        name,
+        apiKey: generateApiKey(),
+        plan: capabilities.plan,
+        allowGroupChat: capabilities.allowGroupChat,
+        allowDirectChat: capabilities.allowDirectChat,
+      },
     });
     res.status(201).json({
       id: project.id,
       name: project.name,
       apiKey: project.apiKey,
       plan: project.plan,
+      allowGroupChat: project.allowGroupChat,
+      allowDirectChat: project.allowDirectChat,
     });
   }),
 );
@@ -369,13 +478,17 @@ app.post(
       });
     }
 
+    const capabilities = resolveChatCapabilities(req.body, req.project);
+
     const chatToken = jwt.sign(
       {
         userId: chatUser.id,
         projectId: req.project.id,
         name: chatUser.name,
         email: chatUser.email,
-        plan: req.project.plan || "premium",
+        plan: capabilities.plan,
+        allowGroupChat: capabilities.allowGroupChat,
+        allowDirectChat: capabilities.allowDirectChat,
       },
       CHAT_JWT_SECRET,
       { expiresIn: "24h" },
@@ -386,8 +499,17 @@ app.post(
       token: chatToken,
       chatUrl: CHAT_FRONTEND_URL,
       projectId: req.project.id,
-      plan: req.project.plan || "premium",
-      user: { id: chatUser.id, name: chatUser.name, email: chatUser.email },
+      plan: capabilities.plan,
+      allowGroupChat: capabilities.allowGroupChat,
+      allowDirectChat: capabilities.allowDirectChat,
+      user: {
+        id: chatUser.id,
+        name: chatUser.name,
+        email: chatUser.email,
+        plan: capabilities.plan,
+        allowGroupChat: capabilities.allowGroupChat,
+        allowDirectChat: capabilities.allowDirectChat,
+      },
     });
   }),
 );
@@ -458,6 +580,10 @@ app.post(
 app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
   const { excludeId, q } = req.query;
   try {
+    const { allowDirectChat, allowGroupChat } = await getProjectPermissions(req.projectId, req);
+    if (!allowDirectChat && !allowGroupChat) {
+      return res.json([]);
+    }
     const where = { projectId: req.projectId };
     if (excludeId) where.id = { not: excludeId };
     if (q) where.name = { contains: q, mode: "insensitive" };
@@ -488,15 +614,27 @@ app.get(
         .json({ error: "Cannot access another user's rooms" });
     }
     try {
+      const { allowDirectChat, allowGroupChat } = await getProjectPermissions(req.projectId, req);
+      if (!allowDirectChat && !allowGroupChat) {
+        return res.json([]);
+      }
+
+      const roomConditions = [];
+      if (allowGroupChat) {
+        roomConditions.push({ isGroup: true });
+      }
+      if (allowDirectChat) {
+        roomConditions.push(
+          { isGroup: false, directStatus: "accepted" },
+          { isGroup: false, directStatus: "pending", messages: { some: {} } },
+        );
+      }
+
       const rooms = await prisma.chatRoom.findMany({
         where: {
           projectId: req.projectId,
           members: { some: { userId } },
-          OR: [
-            { isGroup: true },
-            { directStatus: "accepted" },
-            { directStatus: "pending", messages: { some: {} } },
-          ],
+          OR: roomConditions,
         },
         include: { members: { include: { user: true } } },
         orderBy: [
@@ -516,8 +654,10 @@ app.get(
 
 // Create or get direct 1-to-1 room
 app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
-  const project = await prisma.project.findUnique({ where: { id: req.projectId }, select: { plan: true } });
-  if (project?.plan === "basic") return sendError(res, 403, "Direct messaging is not available on the basic plan");
+  const { allowDirectChat } = await getProjectPermissions(req.projectId, req);
+  if (!allowDirectChat) {
+    return sendError(res, 403, "Direct messaging is not enabled for this project");
+  }
   // The current user is the authenticated JWT user, not a client-supplied id.
   const userId1 = req.userId;
   // Accept the other party from either field name for backwards compatibility.
@@ -569,8 +709,10 @@ app.post(
   `${API_BASE}/rooms/direct/request`,
   authenticateChatJWT,
   async (req, res) => {
-    const project = await prisma.project.findUnique({ where: { id: req.projectId }, select: { plan: true } });
-    if (project?.plan === "basic") return sendError(res, 403, "Direct messaging is not available on the basic plan");
+    const { allowDirectChat } = await getProjectPermissions(req.projectId, req);
+    if (!allowDirectChat) {
+      return sendError(res, 403, "Direct messaging is not enabled for this project");
+    }
     const senderId = req.userId;
     const userId2 = req.body?.userId2;
     const content = typeof req.body?.content === "string" ? req.body.content.trim() : "";
@@ -701,6 +843,10 @@ app.post(
   `${API_BASE}/rooms/:roomId/accept`,
   authenticateChatJWT,
   async (req, res) => {
+    const { allowDirectChat } = await getProjectPermissions(req.projectId, req);
+    if (!allowDirectChat) {
+      return sendError(res, 403, "Direct messaging is not enabled for this project");
+    }
     const { roomId } = req.params;
     try {
       const room = await prisma.chatRoom.findFirst({
@@ -747,15 +893,77 @@ app.post(
   },
 );
 
+// ─── Upload group avatar (before the room is created) ────────────────────────
+// POST /api/rooms/group/avatar
+// Authenticated; returns { avatarUrl } which callers pass into POST /rooms/group.
+app.post(
+  `${API_BASE}/rooms/group/avatar`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res, next) => {
+    const { allowGroupChat } = await getProjectPermissions(req.projectId, req);
+    if (!allowGroupChat) {
+      return sendError(res, 403, "Group chat is not enabled for this project");
+    }
+    next();
+  }),
+  parseRoomUpload,
+  asyncHandler(async (req, res) => {
+    if (!req.file) return sendError(res, 400, "A file is required");
+
+    // Only images are accepted as group avatars (not PDFs).
+    const allowedType = UPLOAD_TYPES[req.file.mimetype];
+    if (!allowedType || allowedType.fileType !== "image") {
+      await fs.promises.unlink(path.join(UPLOAD_DIR, req.file.filename)).catch(() => {});
+      return sendError(res, 400, "Only image files (JPEG, PNG, GIF, WebP) are accepted for group avatars");
+    }
+
+    // Verify magic bytes to prevent MIME spoofing.
+    const filePath = path.join(UPLOAD_DIR, req.file.filename);
+    const signature = await fs.promises.readFile(filePath);
+    if (!hasAllowedFileSignature(signature, req.file.mimetype)) {
+      await fs.promises.unlink(filePath).catch(() => {});
+      return sendError(res, 400, "File contents do not match an allowed image type");
+    }
+
+    const avatarUrl = `${BACKEND_URL}${API_BASE}/uploads/${req.file.filename}`;
+    res.status(201).json({ avatarUrl });
+  }),
+);
+
 // Create group room
 app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
-  const { name, memberIds } = req.body;
+  const { allowGroupChat } = await getProjectPermissions(req.projectId, req);
+  if (!allowGroupChat) {
+    return sendError(res, 403, "Group chat is not enabled for this project");
+  }
+
+  const { name, memberIds, avatarUrl, description } = req.body;
   const creatorId = req.userId;
   if (!name || !memberIds?.length) {
     return res
       .status(400)
       .json({ error: "name and memberIds are required" });
   }
+
+  // Validate the avatarUrl if provided — must be a URL served by this backend.
+  const safeAvatarUrl = (() => {
+    if (!avatarUrl) return null;
+    try {
+      const u = new URL(String(avatarUrl));
+      const base = new URL(BACKEND_URL);
+      if (u.origin !== base.origin) return null;
+      if (!u.pathname.startsWith(`${API_BASE}/uploads/`)) return null;
+      const filename = path.basename(u.pathname);
+      if (!/^[0-9a-f-]{36}\.(jpg|png|gif|webp)$/i.test(filename)) return null;
+      return avatarUrl;
+    } catch {
+      return null;
+    }
+  })();
+
+  const safeDescription = description && String(description).trim()
+    ? String(description).trim().slice(0, 500)
+    : null;
 
   const allIds = Array.from(new Set([creatorId, ...memberIds]));
   const validCount = await prisma.chatUser.count({
@@ -773,6 +981,8 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
         projectId: req.projectId,
         name,
         isGroup: true,
+        avatarUrl: safeAvatarUrl,
+        description: safeDescription,
         members: { create: allIds.map((userId) => ({ userId })) },
       },
       include: { members: { include: { user: true } } },
@@ -801,6 +1011,13 @@ app.get(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, async (req, res) => {
     if (!room.members.some((member) => member.userId === req.userId)) {
       return res.status(403).json({ error: "Not a member of this room" });
     }
+    const { allowDirectChat, allowGroupChat } = await getProjectPermissions(req.projectId, req);
+    if (room.isGroup && !allowGroupChat) {
+      return sendError(res, 403, "Group chat is not enabled for this project");
+    }
+    if (!room.isGroup && !allowDirectChat) {
+      return sendError(res, 403, "Direct messaging is not enabled for this project");
+    }
     res.json(await serializeRoomForUser(room, req.userId));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -811,11 +1028,20 @@ app.post(
   `${API_BASE}/rooms/:roomId/upload`,
   authenticateChatJWT,
   asyncHandler(async (req, res, next) => {
-    const member = await prisma.chatRoomMember.findUnique({
-      where: { roomId_userId: { roomId: req.params.roomId, userId: req.userId } },
-      select: { roomId: true },
+    const room = await prisma.chatRoom.findFirst({
+      where: { id: req.params.roomId, projectId: req.projectId },
+      include: { members: { where: { userId: req.userId } } },
     });
-    if (!member) return res.status(403).json({ error: "Not a member of this room" });
+    if (!room || room.members.length === 0) {
+      return res.status(403).json({ error: "Not a member of this room" });
+    }
+    const { allowDirectChat, allowGroupChat } = await getProjectPermissions(req.projectId, req);
+    if (room.isGroup && !allowGroupChat) {
+      return sendError(res, 403, "Group chat is not enabled for this project");
+    }
+    if (!room.isGroup && !allowDirectChat) {
+      return sendError(res, 403, "Direct messaging is not enabled for this project");
+    }
     next();
   }),
   parseRoomUpload,
@@ -876,6 +1102,41 @@ app.get(
   }),
 );
 
+// ─── Serve general uploads (group avatars etc.) ───────────────────────────────
+// GET /api/uploads/:filename
+// JWT-protected. Any authenticated member of the same project can load avatars.
+app.get(
+  `${API_BASE}/uploads/:filename`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res) => {
+    const { filename } = req.params;
+    // Only image files allowed here (avatars are never PDFs).
+    if (
+      path.basename(filename) !== filename ||
+      !/^[0-9a-f-]{36}\.(jpg|png|gif|webp)$/i.test(filename)
+    ) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    // Confirm the file is referenced as a group avatarUrl within this project.
+    const room = await prisma.chatRoom.findFirst({
+      where: {
+        projectId: req.projectId,
+        avatarUrl: { endsWith: `/uploads/${filename}` },
+      },
+      select: { id: true },
+    });
+    if (!room) return res.status(404).json({ error: "Not found" });
+
+    const filePath = path.join(UPLOAD_DIR, filename);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", "inline");
+    res.sendFile(filePath, (err) => {
+      if (err && !res.headersSent) res.status(err.statusCode || 404).end();
+    });
+  }),
+);
+
 // Get room messages (paginated, WhatsApp-style)
 //
 // Query params:
@@ -910,6 +1171,14 @@ app.get(
       });
       if (!membership)
         return res.status(403).json({ error: "Not a member of this room" });
+
+      const { allowDirectChat, allowGroupChat } = await getProjectPermissions(req.projectId, req);
+      if (room.isGroup && !allowGroupChat) {
+        return sendError(res, 403, "Group chat is not enabled for this project");
+      }
+      if (!room.isGroup && !allowDirectChat) {
+        return sendError(res, 403, "Direct messaging is not enabled for this project");
+      }
 
       const where = { roomId };
       if (before && !isNaN(before.getTime())) {
@@ -1020,24 +1289,41 @@ app.get(
   async (req, res) => {
     const userId = req.userId;
     try {
+      const { allowDirectChat, allowGroupChat } = await getProjectPermissions(req.projectId, req);
+      if (!allowDirectChat && !allowGroupChat) {
+        return res.json({ unreadMessages: 0, pendingRequests: 0, total: 0 });
+      }
+
+      const roomFilters = [];
+      if (allowGroupChat) {
+        roomFilters.push({ isGroup: true });
+      }
+      if (allowDirectChat) {
+        roomFilters.push({ isGroup: false, directStatus: "accepted" });
+      }
+
       const [memberships, pendingRequests] = await Promise.all([
-        prisma.chatRoomMember.findMany({
-          where: {
-            userId,
-            room: { projectId: req.projectId, directStatus: "accepted" },
-          },
-          select: { roomId: true, joinedAt: true, lastReadAt: true },
-        }),
-        prisma.chatRoom.count({
-          where: {
-            projectId: req.projectId,
-            isGroup: false,
-            directStatus: "pending",
-            requestedById: { not: userId },
-            messages: { some: {} },
-            members: { some: { userId } },
-          },
-        }),
+        roomFilters.length > 0
+          ? prisma.chatRoomMember.findMany({
+              where: {
+                userId,
+                room: { projectId: req.projectId, OR: roomFilters },
+              },
+              select: { roomId: true, joinedAt: true, lastReadAt: true },
+            })
+          : Promise.resolve([]),
+        allowDirectChat
+          ? prisma.chatRoom.count({
+              where: {
+                projectId: req.projectId,
+                isGroup: false,
+                directStatus: "pending",
+                requestedById: { not: userId },
+                messages: { some: {} },
+                members: { some: { userId } },
+              },
+            })
+          : Promise.resolve(0),
       ]);
       const unreadCounts = await Promise.all(
         memberships.map((membership) =>
@@ -1150,6 +1436,9 @@ io.use((socket, next) => {
     const payload = jwt.verify(token, CHAT_JWT_SECRET);
     socket.userId = payload.userId;
     socket.projectId = payload.projectId;
+    socket.plan = payload.plan;
+    socket.allowGroupChat = payload.allowGroupChat;
+    socket.allowDirectChat = payload.allowDirectChat;
     next();
   } catch {
     next(new Error("Invalid token"));
@@ -1166,8 +1455,21 @@ io.on("connection", (socket) => {
   // receiving realtime messages without having to re-open each chat.
   (async () => {
     try {
+      const { allowDirectChat, allowGroupChat } = await getProjectPermissions(socket.projectId, socket);
+      if (!allowDirectChat && !allowGroupChat) return;
+
+      const roomConditions = [];
+      if (allowGroupChat) roomConditions.push({ isGroup: true });
+      if (allowDirectChat) roomConditions.push({ isGroup: false });
+
       const memberships = await prisma.chatRoomMember.findMany({
-        where: { userId: socket.userId, room: { projectId: socket.projectId } },
+        where: {
+          userId: socket.userId,
+          room: {
+            projectId: socket.projectId,
+            OR: roomConditions,
+          },
+        },
         select: { roomId: true },
       });
       for (const m of memberships) socket.join(m.roomId);
@@ -1220,6 +1522,19 @@ io.on("connection", (socket) => {
       return socket.emit("error", {
         message: "Room not found or unauthorized",
       });
+
+    const { allowDirectChat, allowGroupChat } = await getProjectPermissions(socket.projectId, socket);
+    if (room.isGroup && !allowGroupChat) {
+      return socket.emit("error", {
+        message: "Group chat is not enabled for this project",
+      });
+    }
+    if (!room.isGroup && !allowDirectChat) {
+      return socket.emit("error", {
+        message: "Direct messaging is not enabled for this project",
+      });
+    }
+
     socket.join(roomId);
   });
 
@@ -1239,6 +1554,30 @@ io.on("connection", (socket) => {
           where: { id: roomId, projectId: socket.projectId },
         });
         if (!room) return socket.emit("error", { message: "Room not found" });
+
+        const { allowDirectChat, allowGroupChat } = await getProjectPermissions(socket.projectId, socket);
+        if (room.isGroup && !allowGroupChat) {
+          socket.emit("message_ack", {
+            clientId: clientId || null,
+            status: "failed",
+            error: "Group chat is not enabled for this project",
+          });
+          return socket.emit("error", {
+            message: "Group chat is not enabled for this project",
+            clientId: clientId || null,
+          });
+        }
+        if (!room.isGroup && !allowDirectChat) {
+          socket.emit("message_ack", {
+            clientId: clientId || null,
+            status: "failed",
+            error: "Direct messaging is not enabled for this project",
+          });
+          return socket.emit("error", {
+            message: "Direct messaging is not enabled for this project",
+            clientId: clientId || null,
+          });
+        }
 
         const members = await prisma.chatRoomMember.findMany({
           where: { roomId },
@@ -1377,15 +1716,19 @@ io.on("connection", (socket) => {
   socket.on("message_delivered", async ({ roomId }) => {
     if (!roomId) return;
     try {
-      const membership = await prisma.chatRoom.findFirst({
+      const room = await prisma.chatRoom.findFirst({
         where: {
           id: roomId,
           projectId: socket.projectId,
           members: { some: { userId: socket.userId } },
         },
-        select: { id: true },
+        select: { id: true, isGroup: true },
       });
-      if (!membership) return;
+      if (!room) return;
+
+      const { allowDirectChat, allowGroupChat } = await getProjectPermissions(socket.projectId, socket);
+      if (room.isGroup && !allowGroupChat) return;
+      if (!room.isGroup && !allowDirectChat) return;
 
       const now = new Date();
       await prisma.message.updateMany({
@@ -1419,6 +1762,10 @@ io.on("connection", (socket) => {
         select: { id: true, isGroup: true },
       });
       if (!membership) return;
+
+      const { allowDirectChat, allowGroupChat } = await getProjectPermissions(socket.projectId, socket);
+      if (membership.isGroup && !allowGroupChat) return;
+      if (!membership.isGroup && !allowDirectChat) return;
 
       const now = new Date();
       const readOperations = [
@@ -1518,6 +1865,18 @@ process.on("unhandledRejection", (reason) => {
   }
 })();
 
-server.listen(PORT, () => {
-  console.log(`Chat service running on port ${PORT}`);
-});
+if (process.env.NODE_ENV !== "test") {
+  server.listen(PORT, () => {
+    console.log(`Chat service running on port ${PORT}`);
+  });
+}
+
+module.exports = {
+  app,
+  server,
+  io,
+  resolveChatCapabilities,
+  getProjectPermissions,
+  parseFeatureFlag,
+  prisma,
+};

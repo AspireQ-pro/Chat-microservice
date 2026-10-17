@@ -10,8 +10,10 @@ model Project {
   id        String   @id @default(uuid())
   name      String
   apiKey    String   @unique
-  plan      String   @default("premium")
-  isActive  Boolean  @default(true)
+  plan            String   @default("custom")
+  allowGroupChat  Boolean  @default(false)
+  allowDirectChat Boolean  @default(false)
+  isActive        Boolean  @default(true)
   createdAt DateTime @default(now())
 
   users     ChatUser[]
@@ -46,6 +48,8 @@ model ChatRoom {
   requestedById     String?
   lastMessageAt     DateTime?
   lastMessagePreview String?
+  avatarUrl         String?
+  description       String?
   createdAt         DateTime @default(now())
 
   project   Project           @relation(fields: [projectId], references: [id])
