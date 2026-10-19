@@ -302,6 +302,10 @@ function resolveChatCapabilities(body = {}, existingProject = null) {
   let allowDirect;
   if (body.allowDirectChat !== undefined) {
     allowDirect = parseFeatureFlag(body.allowDirectChat);
+  } else if (body.allowIndividualChat !== undefined) {
+    allowDirect = parseFeatureFlag(body.allowIndividualChat);
+  } else if (body.individualChat !== undefined) {
+    allowDirect = parseFeatureFlag(body.individualChat);
   } else if (body.allowOneToOneChat !== undefined) {
     allowDirect = parseFeatureFlag(body.allowOneToOneChat);
   } else if (body.directChat !== undefined) {
@@ -318,9 +322,50 @@ function resolveChatCapabilities(body = {}, existingProject = null) {
     }
     if (allowDirect === undefined) {
       if (body.plan.allowDirectChat !== undefined) allowDirect = parseFeatureFlag(body.plan.allowDirectChat);
+      else if (body.plan.allowIndividualChat !== undefined) allowDirect = parseFeatureFlag(body.plan.allowIndividualChat);
+      else if (body.plan.individualChat !== undefined) allowDirect = parseFeatureFlag(body.plan.individualChat);
       else if (body.plan.allowOneToOneChat !== undefined) allowDirect = parseFeatureFlag(body.plan.allowOneToOneChat);
       else if (body.plan.directChat !== undefined) allowDirect = parseFeatureFlag(body.plan.directChat);
       else if (body.plan.oneToOneChat !== undefined) allowDirect = parseFeatureFlag(body.plan.oneToOneChat);
+    }
+  }
+
+  // Check subFeatures map e.g. { CHAT: ["GROUP_CHAT", "INDIVIDUAL_CHAT"] }
+  const subFeatures = body.subFeatures || (typeof body.plan === "object" ? body.plan?.subFeatures : null);
+  if (subFeatures && typeof subFeatures === "object") {
+    const chatSubs = subFeatures.CHAT || subFeatures.chat || subFeatures.Chat || [];
+    if (Array.isArray(chatSubs)) {
+      if (allowGroup === undefined) {
+        if (chatSubs.includes("GROUP_CHAT") || chatSubs.includes("group_chat") || chatSubs.includes("Group Chat")) {
+          allowGroup = true;
+        }
+      }
+      if (allowDirect === undefined) {
+        if (
+          chatSubs.includes("INDIVIDUAL_CHAT") ||
+          chatSubs.includes("individual_chat") ||
+          chatSubs.includes("Individual Chat") ||
+          chatSubs.includes("DIRECT_CHAT") ||
+          chatSubs.includes("direct_chat") ||
+          chatSubs.includes("ONE_TO_ONE_CHAT")
+        ) {
+          allowDirect = true;
+        }
+      }
+    }
+  }
+
+  // Check top-level features array
+  const features = body.features || (typeof body.plan === "object" ? body.plan?.features : null);
+  if (Array.isArray(features)) {
+    if (allowGroup === undefined && (features.includes("GROUP_CHAT") || features.includes("group_chat"))) {
+      allowGroup = true;
+    }
+    if (
+      allowDirect === undefined &&
+      (features.includes("INDIVIDUAL_CHAT") || features.includes("individual_chat") || features.includes("DIRECT_CHAT") || features.includes("direct_chat"))
+    ) {
+      allowDirect = true;
     }
   }
 
@@ -432,6 +477,51 @@ app.post(
   }),
 );
 
+app.patch(
+  `${API_BASE}/projects/:id`,
+  asyncHandler(async (req, res) => {
+    const expectedSecret = process.env.PROJECT_REGISTRATION_SECRET;
+    if (!expectedSecret) {
+      return sendError(res, 503, "Project administration is disabled");
+    }
+    const providedSecret = req.headers["x-registration-secret"];
+    const expectedBuffer = Buffer.from(expectedSecret);
+    const providedBuffer = Buffer.from(String(providedSecret || ""));
+    if (
+      providedBuffer.length !== expectedBuffer.length ||
+      !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+    ) {
+      return sendError(res, 401, "Invalid project registration secret");
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.project.findUnique({ where: { id } });
+    if (!existing) return sendError(res, 404, "Project not found");
+
+    const capabilities = resolveChatCapabilities(req.body, existing);
+    const updated = await prisma.project.update({
+      where: { id },
+      data: {
+        name: req.body.name && String(req.body.name).trim() ? String(req.body.name).trim() : existing.name,
+        plan: capabilities.plan,
+        allowGroupChat: capabilities.allowGroupChat,
+        allowDirectChat: capabilities.allowDirectChat,
+        ...(req.body.isActive !== undefined ? { isActive: Boolean(req.body.isActive) } : {}),
+      },
+    });
+
+    res.json({
+      id: updated.id,
+      name: updated.name,
+      apiKey: updated.apiKey,
+      plan: updated.plan,
+      allowGroupChat: updated.allowGroupChat,
+      allowDirectChat: updated.allowDirectChat,
+      isActive: updated.isActive,
+    });
+  }),
+);
+
 // ═════════════════════════════════════════════════════════════════════════════
 // 2. SYNC USER — Project's backend calls this when a user clicks "Chat"
 //    Server-to-server: X-API-KEY identifies the project, body has user details
@@ -479,6 +569,33 @@ app.post(
     }
 
     const capabilities = resolveChatCapabilities(req.body, req.project);
+
+    if (
+      req.project &&
+      (req.project.allowGroupChat !== capabilities.allowGroupChat ||
+        req.project.allowDirectChat !== capabilities.allowDirectChat ||
+        req.project.plan !== capabilities.plan) &&
+      (req.body.allowGroupChat !== undefined ||
+        req.body.groupChat !== undefined ||
+        req.body.allowDirectChat !== undefined ||
+        req.body.allowIndividualChat !== undefined ||
+        req.body.individualChat !== undefined ||
+        req.body.subFeatures !== undefined ||
+        req.body.features !== undefined ||
+        (typeof req.body.plan === "object" && req.body.plan !== null))
+    ) {
+      await prisma.project.update({
+        where: { id: req.project.id },
+        data: {
+          plan: capabilities.plan,
+          allowGroupChat: capabilities.allowGroupChat,
+          allowDirectChat: capabilities.allowDirectChat,
+        },
+      });
+      req.project.plan = capabilities.plan;
+      req.project.allowGroupChat = capabilities.allowGroupChat;
+      req.project.allowDirectChat = capabilities.allowDirectChat;
+    }
 
     const chatToken = jwt.sign(
       {

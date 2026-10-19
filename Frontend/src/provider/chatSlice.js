@@ -178,9 +178,30 @@ export const acceptDirectRequest = createAsyncThunk(
   },
 );
 
+export const uploadGroupAvatar = createAsyncThunk(
+  "chat/uploadGroupAvatar",
+  async ({ file }, { getState, rejectWithValue }) => {
+    try {
+      if (!file) return rejectWithValue("File is required");
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_BASE}/rooms/group/avatar`, {
+        method: "POST",
+        headers: authHeaders(getState),
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to upload group avatar");
+      return data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 export const createGroup = createAsyncThunk(
   "chat/createGroup",
-  async ({ name, memberIds }, { getState, rejectWithValue }) => {
+  async ({ name, memberIds, avatarUrl, description }, { getState, rejectWithValue }) => {
     try {
       if (!name || !memberIds?.length)
         return rejectWithValue("Name and members required");
@@ -190,10 +211,11 @@ export const createGroup = createAsyncThunk(
           "Content-Type": "application/json",
           ...authHeaders(getState),
         },
-        body: JSON.stringify({ name, memberIds }),
+        body: JSON.stringify({ name, memberIds, avatarUrl, description }),
       });
-      if (!res.ok) throw new Error("Failed to create group");
-      return await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create group");
+      return data;
     } catch (err) {
       return rejectWithValue(err.message);
     }

@@ -9,6 +9,8 @@ import {
   CameraAlt, Edit,
 } from '@mui/icons-material'
 import { useTheme, useMediaQuery } from '@mui/material'
+import { useDispatch } from 'react-redux'
+import { uploadGroupAvatar } from '@/provider/chatSlice'
 
 /* ─── helpers ─────────────────────────────────── */
 function initials(name = '') {
@@ -45,8 +47,11 @@ function CreateGroupDialog({
   groupCreating, groupError,
   handleCreateGroup,
 }) {
+  const dispatch = useDispatch()
   const theme = useTheme()
   const isMobileOrTablet = useMediaQuery(theme.breakpoints.down('md')) // < 900px
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [photoError, setPhotoError] = useState('')
 
   const [step, setStep] = useState(1)          // 1 = select members, 2 = group details
   const [memberSearch, setMemberSearch] = useState('')
@@ -59,6 +64,7 @@ function CreateGroupDialog({
     if (!open && groupPhoto?.previewUrl) {
       URL.revokeObjectURL(groupPhoto.previewUrl)
       setGroupPhoto(null)
+      setPhotoError('')
     }
   }, [open])
 
@@ -93,8 +99,28 @@ function CreateGroupDialog({
   const selectedContacts = contacts.filter((c) => groupMemberIds.includes(c.id))
 
   /* ── submit ── */
-  const onCreateGroup = () => {
-    handleCreateGroup()
+  const onCreateGroup = async () => {
+    let uploadedAvatarUrl = null
+    if (groupPhoto?.file) {
+      setUploadingAvatar(true)
+      setPhotoError('')
+      try {
+        const result = await dispatch(uploadGroupAvatar({ file: groupPhoto.file })).unwrap()
+        uploadedAvatarUrl = result?.avatarUrl || null
+      } catch (err) {
+        setUploadingAvatar(false)
+        setPhotoError(typeof err === 'string' ? err : 'Failed to upload group avatar')
+        return
+      }
+      setUploadingAvatar(false)
+    }
+
+    handleCreateGroup({
+      name: groupName.trim(),
+      memberIds: groupMemberIds,
+      avatarUrl: uploadedAvatarUrl,
+      description: description.trim() || undefined,
+    })
   }
 
   /* ══════════════
@@ -465,7 +491,12 @@ function CreateGroupDialog({
           </Box>
         </Box>
 
-        {groupError && (
+        {(groupError || photoError) && (
+          <Alert severity="error" sx={{ mt: 2, borderRadius: 2, py: 0.5 }}>
+            {photoError || groupError}
+          </Alert>
+        )}
+        {false && (
           <Alert severity="error" sx={{ mt: 2, borderRadius: 2, py: 0.5 }}>
             {groupError}
           </Alert>
@@ -477,9 +508,9 @@ function CreateGroupDialog({
         <Button
           fullWidth
           variant="contained"
-          disabled={groupCreating || !groupName.trim()}
+          disabled={groupCreating || uploadingAvatar || !groupName.trim()}
           onClick={onCreateGroup}
-          startIcon={groupCreating ? <CircularProgress size={16} color="inherit" /> : null}
+          startIcon={(groupCreating || uploadingAvatar) ? <CircularProgress size={16} color="inherit" /> : null}
           sx={{
             bgcolor: '#2D4A44',
             color: '#fff',
