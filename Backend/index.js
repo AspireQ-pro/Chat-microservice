@@ -413,10 +413,16 @@ async function getProjectPermissions(projectId, reqOrSocket = {}) {
     }
   }
 
-  if (allowDirect === undefined) {
+  if (
+    (allowDirect === undefined || (allowDirect === false && allowGroup === false)) &&
+    reqOrSocket.allowDirectChat !== undefined
+  ) {
     allowDirect = parseFeatureFlag(reqOrSocket.allowDirectChat);
   }
-  if (allowGroup === undefined) {
+  if (
+    (allowGroup === undefined || (allowDirect === false && allowGroup === false)) &&
+    reqOrSocket.allowGroupChat !== undefined
+  ) {
     allowGroup = parseFeatureFlag(reqOrSocket.allowGroupChat);
   }
 
