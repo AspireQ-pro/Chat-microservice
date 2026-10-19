@@ -14,38 +14,21 @@ function decodeToken(token) {
   }
 }
 
-function resolveUserCapabilities(decoded) {
+function resolveUserCapabilities(decoded, params) {
   if (!decoded) {
     return { allowGroupChat: true, allowDirectChat: true };
   }
 
-  let allowGroup;
-  if (decoded.allowGroupChat !== undefined) {
-    allowGroup = Boolean(decoded.allowGroupChat);
-  } else if (decoded.groupChat !== undefined) {
-    allowGroup = Boolean(decoded.groupChat);
-  } else if (decoded.plan === "basic") {
-    allowGroup = true;
-  } else {
-    allowGroup = true;
-  }
+  const urlDirect = params?.get("allowDirectChat");
+  const urlGroup = params?.get("allowGroupChat");
 
-  let allowDirect;
-  if (decoded.allowDirectChat !== undefined) {
-    allowDirect = Boolean(decoded.allowDirectChat);
-  } else if (decoded.allowIndividualChat !== undefined) {
-    allowDirect = Boolean(decoded.allowIndividualChat);
-  } else if (decoded.individualChat !== undefined) {
-    allowDirect = Boolean(decoded.individualChat);
-  } else if (decoded.directChat !== undefined) {
-    allowDirect = Boolean(decoded.directChat);
-  } else if (decoded.oneToOneChat !== undefined) {
-    allowDirect = Boolean(decoded.oneToOneChat);
-  } else if (decoded.plan === "basic") {
-    allowDirect = false;
-  } else {
-    allowDirect = true;
-  }
+  const allowDirect = urlDirect !== null
+    ? urlDirect === "true"
+    : Boolean(decoded.allowDirectChat);
+
+  const allowGroup = urlGroup !== null
+    ? urlGroup === "true"
+    : Boolean(decoded.allowGroupChat);
 
   return {
     allowGroupChat: allowGroup,
@@ -76,14 +59,21 @@ export function useSSOAuth() {
               name: import.meta.env.VITE_DEV_USER_NAME || "Dev User",
               email: import.meta.env.VITE_DEV_USER_EMAIL || "dev@example.com",
               plan: import.meta.env.VITE_DEV_PLAN || "custom",
-              allowGroupChat: import.meta.env.VITE_DEV_ALLOW_GROUP_CHAT !== "false",
-              allowDirectChat: import.meta.env.VITE_DEV_ALLOW_DIRECT_CHAT !== "false",
+              allowGroupChat: params.get("allowGroupChat") !== null
+                ? params.get("allowGroupChat") === "true"
+                : import.meta.env.VITE_DEV_ALLOW_GROUP_CHAT !== "false",
+              allowDirectChat: params.get("allowDirectChat") !== null
+                ? params.get("allowDirectChat") === "true"
+                : import.meta.env.VITE_DEV_ALLOW_DIRECT_CHAT !== "false",
             },
           }),
         );
       }
       return;
     }
+
+    const decoded = decodeToken(tokenFromUrl);
+    const { allowGroupChat, allowDirectChat } = resolveUserCapabilities(decoded, params);
 
     params.delete("token");
     const newSearch = params.toString();
@@ -92,9 +82,6 @@ export function useSSOAuth() {
       "",
       window.location.pathname + (newSearch ? `?${newSearch}` : ""),
     );
-
-    const decoded = decodeToken(tokenFromUrl);
-    const { allowGroupChat, allowDirectChat } = resolveUserCapabilities(decoded);
 
     dispatch(
       setAuth({
