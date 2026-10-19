@@ -145,6 +145,16 @@ export function useChatHandler() {
 
   const activeRoom = rooms.find((r) => r.id === activeRoomId) ?? null;
 
+  useEffect(() => {
+    if (currentUser?.allowDirectChat === false) {
+      if (selectedContactId) dispatch(selectContact(null));
+      if (activeRoom && !activeRoom.isGroup) dispatch(setActiveRoom(null));
+    }
+    if (currentUser?.allowGroupChat === false) {
+      if (activeRoom?.isGroup) dispatch(setActiveRoom(null));
+    }
+  }, [currentUser?.allowDirectChat, currentUser?.allowGroupChat, activeRoom, selectedContactId, dispatch]);
+
   const activeContact = (() => {
     if (!activeRoom) {
       return contacts.find((contact) => contact.id === selectedContactId) ?? null;
@@ -154,6 +164,8 @@ export function useChatHandler() {
         id: activeRoom.id,
         name: activeRoom.name,
         avatar: activeRoom.name?.slice(0, 2).toUpperCase() || "GR",
+        avatarUrl: activeRoom.avatarUrl || null,
+        description: activeRoom.description || null,
         online: false,
         isGroup: true,
       };
@@ -369,6 +381,10 @@ export function useChatHandler() {
     const text = input.trim();
     if (!text) return;
     if (!activeRoomId && selectedContactId) {
+      if (currentUser?.allowDirectChat === false) {
+        setSendError("Individual chat is not enabled for this project.");
+        return;
+      }
       if (sendingFirstMessage) return;
       setSendingFirstMessage(true);
       setSendError("");
@@ -389,6 +405,14 @@ export function useChatHandler() {
       return;
     }
     if (!activeRoomId) return;
+    if (activeRoom?.isGroup && currentUser?.allowGroupChat === false) {
+      setSendError("Group chat is not enabled for this project.");
+      return;
+    }
+    if (activeRoom && !activeRoom.isGroup && currentUser?.allowDirectChat === false) {
+      setSendError("Individual chat is not enabled for this project.");
+      return;
+    }
     setSendError("");
     const clientId = makeClientId();
     const socket = getSocket();
@@ -475,6 +499,14 @@ export function useChatHandler() {
 
   const handleUploadFile = useCallback(async (file) => {
     if (!file || !activeRoomId) return;
+    if (activeRoom?.isGroup && currentUser?.allowGroupChat === false) {
+      setSendError("Group chat is not enabled for this project.");
+      return;
+    }
+    if (activeRoom && !activeRoom.isGroup && currentUser?.allowDirectChat === false) {
+      setSendError("Individual chat is not enabled for this project.");
+      return;
+    }
     const socket = getSocket();
     if (!socket?.connected) {
       setSendError("Connect to Chat before sending an attachment.");
@@ -526,21 +558,24 @@ export function useChatHandler() {
 
   const handleSelectContact = useCallback(
     (contactId) => {
+      if (currentUser?.allowDirectChat === false) return;
       const room = findDirectRoom(rooms, contactId, chatUserId);
       setSendError("");
       if (room) dispatch(setActiveRoom(room));
       else dispatch(selectContact(contactId));
       if (isMobile) setShowPanel(false);
     },
-    [dispatch, rooms, chatUserId, isMobile],
+    [dispatch, rooms, chatUserId, isMobile, currentUser?.allowDirectChat],
   );
 
   const handleSelectRoom = useCallback(
     (room) => {
+      if (room?.isGroup && currentUser?.allowGroupChat === false) return;
+      if (room && !room.isGroup && currentUser?.allowDirectChat === false) return;
       dispatch(setActiveRoom(room));
       if (isMobile) setShowPanel(false);
     },
-    [dispatch, isMobile],
+    [dispatch, isMobile, currentUser?.allowGroupChat, currentUser?.allowDirectChat],
   );
 
   const getLastMessage = useCallback(
@@ -569,11 +604,12 @@ export function useChatHandler() {
   );
 
   const openGroupDialog = useCallback(() => {
+    if (currentUser?.allowGroupChat === false) return;
     setGroupName("");
     setGroupMemberIds([]);
     setGroupError("");
     setGroupDialogOpen(true);
-  }, []);
+  }, [currentUser?.allowGroupChat]);
   const closeGroupDialog = useCallback(() => {
     setGroupDialogOpen(false);
     setGroupName("");
@@ -585,33 +621,45 @@ export function useChatHandler() {
       prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
     );
   }, []);
-  const handleCreateGroup = useCallback(async () => {
-    if (!groupName.trim()) {
-      setGroupError("Group name is required.");
-      return;
-    }
-    if (groupMemberIds.length === 0) {
-      setGroupError("Select at least one member.");
-      return;
-    }
-    setGroupCreating(true);
-    setGroupError("");
-    try {
-      await dispatch(
-        createGroup({ name: groupName.trim(), memberIds: groupMemberIds }),
-      ).unwrap();
-      closeGroupDialog();
-      if (isMobile) setShowPanel(false);
-    } catch (err) {
-      setGroupError(
-        typeof err === "string"
-          ? err
-          : err?.message || "Failed to create group. Try again.",
-      );
-    } finally {
-      setGroupCreating(false);
-    }
-  }, [dispatch, groupName, groupMemberIds, closeGroupDialog, isMobile]);
+  const handleCreateGroup = useCallback(
+    async (payload) => {
+      if (currentUser?.allowGroupChat === false) {
+        setGroupError("Group chat is not enabled for this project.");
+        return;
+      }
+      const name = (payload?.name !== undefined ? payload.name : groupName).trim();
+      const memberIds = payload?.memberIds || groupMemberIds;
+      const avatarUrl = payload?.avatarUrl || null;
+      const description = payload?.description || null;
+
+      if (!name) {
+        setGroupError("Group name is required.");
+        return;
+      }
+      if (memberIds.length === 0) {
+        setGroupError("Select at least one member.");
+        return;
+      }
+      setGroupCreating(true);
+      setGroupError("");
+      try {
+        await dispatch(
+          createGroup({ name, memberIds, avatarUrl, description }),
+        ).unwrap();
+        closeGroupDialog();
+        if (isMobile) setShowPanel(false);
+      } catch (err) {
+        setGroupError(
+          typeof err === "string"
+            ? err
+            : err?.message || "Failed to create group. Try again.",
+        );
+      } finally {
+        setGroupCreating(false);
+      }
+    },
+    [dispatch, groupName, groupMemberIds, currentUser?.allowGroupChat, closeGroupDialog, isMobile],
+  );
 
   return {
     input,

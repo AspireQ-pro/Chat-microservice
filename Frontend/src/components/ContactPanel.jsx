@@ -102,12 +102,17 @@ function ContactPanel({
   openGroupDialog,
   setShowPanel,
 }) {
-  const plan = useSelector((s) => s.auth.user?.plan) || "premium";
-  const isPremium = plan === "premium";
-  const [activeTab, setActiveTab] = useState(0); // 0 = All Chats, 1 = Groups
+  const user = useSelector((s) => s.auth.user);
+  const allowGroupChat = user?.allowGroupChat !== false;
+  const allowDirectChat = user?.allowDirectChat !== false;
+  const showTabs = allowGroupChat && allowDirectChat;
 
+  const [activeTab, setActiveTab] = useState(0); // 0 = Direct Chats, 1 = Groups
+
+  const searchLower = (search || "").trim().toLowerCase();
   const groupRooms = rooms
     .filter((room) => room.isGroup)
+    .filter((room) => !searchLower || (room.name || "").toLowerCase().includes(searchLower))
     .slice()
     .sort((a, b) => {
       const unreadDiff =
@@ -118,6 +123,15 @@ function ContactPanel({
         new Date(a.lastMessageAt || a.createdAt)
       );
     });
+
+  const searchPlaceholder =
+    allowGroupChat && !allowDirectChat
+      ? "Search groups"
+      : !allowGroupChat && allowDirectChat
+        ? "Search contacts"
+        : activeTab === 1
+          ? "Search groups"
+          : "Search contacts";
 
   return (
     <Box
@@ -149,13 +163,10 @@ function ContactPanel({
           <IconButton
             size="small"
             onClick={() => {
-              // If embedded in an iframe, tell the parent app to navigate back
-              // (same behaviour as every other dashboard tab's back arrow).
-              // Fall back to setShowPanel for standalone / desktop use.
               if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'CHAT_GO_BACK' }, '*')
+                window.parent.postMessage({ type: "CHAT_GO_BACK" }, "*");
               } else {
-                setShowPanel && setShowPanel(false)
+                setShowPanel && setShowPanel(false);
               }
             }}
             sx={{ p: 1, minWidth: 36, minHeight: 36, lineHeight: 1 }}
@@ -174,63 +185,68 @@ function ContactPanel({
             flex: 1,
           }}
         >
-          Chats
+          {allowGroupChat && !allowDirectChat
+            ? "Group Chats"
+            : !allowGroupChat && allowDirectChat
+              ? "Individual Chats"
+              : "Chats"}
         </Typography>
       </Box>
 
       {/* Search */}
-      <Box
-        sx={{
-          px: "16px",
-          py: "12px",
-          bgcolor: "#FFFFFF",
-        }}
-      >
-        <TextField
-          fullWidth
-          size="small"
-          placeholder="Search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start" sx={{ mr: 0 }}>
-                <Search sx={{ fontSize: 18, color: "text.disabled" }} />
-              </InputAdornment>
-            ),
-
-          }}
+      {(allowGroupChat || allowDirectChat) && (
+        <Box
           sx={{
-            "& .MuiOutlinedInput-root": {
-              height: 48,
-              borderRadius: "8px",
-              bgcolor: "#fff",
-              gap: "10px",
-              "& fieldset": {
-                borderColor: "#E0E0E0",
-                borderWidth: "1px",
-              },
-              "&:hover fieldset": {
-                borderColor: "#BDBDBD",
-              },
-              "&.Mui-focused fieldset": {
-                borderColor: "#3C4F4A",
-                borderWidth: "1px",
-              },
-            },
-            "& .MuiOutlinedInput-input": {
-              padding: "14px 0",
-              fontSize: "0.875rem",
-            },
-            "& .MuiInputAdornment-positionStart": {
-              marginRight: 0,
-            },
+            px: "16px",
+            py: "12px",
+            bgcolor: "#FFFFFF",
           }}
-        />
-      </Box>
+        >
+          <TextField
+            fullWidth
+            size="small"
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start" sx={{ mr: 0 }}>
+                  <Search sx={{ fontSize: 18, color: "text.disabled" }} />
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              "& .MuiOutlinedInput-root": {
+                height: 48,
+                borderRadius: "8px",
+                bgcolor: "#fff",
+                gap: "10px",
+                "& fieldset": {
+                  borderColor: "#E0E0E0",
+                  borderWidth: "1px",
+                },
+                "&:hover fieldset": {
+                  borderColor: "#BDBDBD",
+                },
+                "&.Mui-focused fieldset": {
+                  borderColor: "#3C4F4A",
+                  borderWidth: "1px",
+                },
+              },
+              "& .MuiOutlinedInput-input": {
+                padding: "14px 0",
+                fontSize: "0.875rem",
+              },
+              "& .MuiInputAdornment-positionStart": {
+                marginRight: 0,
+              },
+            }}
+          />
+        </Box>
+      )}
 
-      {/* Pill Tabs — only shown on premium (basic goes straight to groups) */}
-      {isPremium && (
+      {/* Pill Tabs — shown when both group chat and individual chat are enabled */}
+      {showTabs && (
         <Box
           sx={{
             px: 1.5,
@@ -276,7 +292,7 @@ function ContactPanel({
                 userSelect: "none",
               }}
             >
-              All Chats
+              Direct Chats
             </Box>
             <Box
               onClick={() => setActiveTab(1)}
@@ -310,8 +326,17 @@ function ContactPanel({
 
       {/* Content */}
       <Box sx={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {/* Basic plan: render groups list directly, no tab UI */}
-        {!isPremium ? (
+        {!allowGroupChat && !allowDirectChat ? (
+          <Box sx={{ px: 3, py: 6, textAlign: "center" }}>
+            <Typography variant="body2" fontWeight={600} color="text.secondary" gutterBottom>
+              Chat Disabled
+            </Typography>
+            <Typography variant="caption" color="text.disabled">
+              Neither group chat nor individual chat is enabled for this project.
+            </Typography>
+          </Box>
+        ) : (!showTabs ? allowGroupChat : activeTab === 1) ? (
+          /* ── Groups view ── */
           <GroupsList
             groupRooms={groupRooms}
             activeRoomId={activeRoomId}
@@ -319,8 +344,8 @@ function ContactPanel({
             openGroupDialog={openGroupDialog}
             handleSelectRoom={handleSelectRoom}
           />
-        ) : activeTab === 0 ? (
-          /* ── All Chats tab (premium) ── */
+        ) : (
+          /* ── Direct / Individual Chats view ── */
           <List disablePadding>
             {filteredContacts.length === 0 ? (
               <Box sx={{ px: 2, py: 4, textAlign: "center" }}>
@@ -341,15 +366,6 @@ function ContactPanel({
               ))
             )}
           </List>
-        ) : (
-          /* ── Groups tab (premium) ── */
-          <GroupsList
-            groupRooms={groupRooms}
-            activeRoomId={activeRoomId}
-            unreadCounts={unreadCounts}
-            openGroupDialog={openGroupDialog}
-            handleSelectRoom={handleSelectRoom}
-          />
         )}
       </Box>
     </Box>

@@ -1,4 +1,5 @@
 import React, { useRef } from "react";
+import { useSelector } from "react-redux";
 import {
   Alert,
   Avatar,
@@ -46,6 +47,9 @@ function ChatWindow({
   onViewMembers,
 }) {
   const fileInputRef = useRef(null);
+  const user = useSelector((s) => s.auth.user);
+  const allowGroupChat = user?.allowGroupChat !== false;
+  const allowDirectChat = user?.allowDirectChat !== false;
 
   if (!activeContact) {
     return (
@@ -76,10 +80,22 @@ function ChatWindow({
           <Send sx={{ color: "#3C4F4A", fontSize: 28 }} />
         </Avatar>
         <Typography variant="h6" fontWeight={600}>
-          Chat
+          {!allowGroupChat && !allowDirectChat
+            ? "Chat Disabled"
+            : allowGroupChat && !allowDirectChat
+              ? "Group Chat"
+              : !allowGroupChat && allowDirectChat
+                ? "Individual Chat"
+                : "Chat"}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Select a contact or group to start messaging
+          {!allowGroupChat && !allowDirectChat
+            ? "Neither group chat nor individual chat is enabled for this project"
+            : allowGroupChat && !allowDirectChat
+              ? "Select a group to start messaging"
+              : !allowGroupChat && allowDirectChat
+                ? "Select a contact to start messaging"
+                : "Select a contact or group to start messaging"}
         </Typography>
       </Box>
     );
@@ -142,6 +158,7 @@ function ChatWindow({
           }
         >
           <Avatar
+            src={activeContact.avatarUrl || undefined}
             sx={{
               bgcolor: activeContact.isGroup ? "#7e57c2" : "#3C4F4A",
               width: 38,
@@ -239,6 +256,16 @@ function ChatWindow({
         </Box>
       ) : (
         <Box sx={{ px: 2, py: 1.5, borderTop: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
+          {activeContact.isGroup && !allowGroupChat && (
+            <Alert severity="warning" sx={{ mb: 1 }}>
+              Group chat is not enabled for this project.
+            </Alert>
+          )}
+          {!activeContact.isGroup && !allowDirectChat && (
+            <Alert severity="warning" sx={{ mb: 1 }}>
+              Individual chat is not enabled for this project.
+            </Alert>
+          )}
           {sendError && <Alert severity="error" sx={{ mb: 1 }}>{sendError}</Alert>}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <input
@@ -255,7 +282,7 @@ function ChatWindow({
             <IconButton
               aria-label="Attach image or PDF"
               onClick={() => fileInputRef.current?.click()}
-              disabled={!activeRoom?.id || uploadingFile || sendingFirstMessage}
+              disabled={!activeRoom?.id || uploadingFile || sendingFirstMessage || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
             >
               {uploadingFile ? <CircularProgress size={18} /> : <AttachFile fontSize="small" />}
             </IconButton>
@@ -272,12 +299,12 @@ function ChatWindow({
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={sendingFirstMessage || uploadingFile}
+              disabled={sendingFirstMessage || uploadingFile || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
               sx={{ "& .MuiOutlinedInput-root": { borderRadius: "12px", bgcolor: "#f8fafc" } }}
             />
             <IconButton
               onClick={handleSend}
-              disabled={!input.trim() || sendingFirstMessage || uploadingFile}
+              disabled={!input.trim() || sendingFirstMessage || uploadingFile || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
               sx={{
                 bgcolor: input.trim() ? "#3C4F4A" : "#e0e0e0",
                 color: input.trim() ? "#fff" : "#9e9e9e",

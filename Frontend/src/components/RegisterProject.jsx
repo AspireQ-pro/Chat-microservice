@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Box, Typography, TextField, Button, Paper, Alert, Snackbar } from '@mui/material'
+import { Box, Typography, TextField, Button, Paper, Alert, Snackbar, FormControlLabel, Checkbox } from '@mui/material'
 import ContentCopy from '@mui/icons-material/ContentCopy'
 
 const API =
@@ -9,6 +9,8 @@ const API =
 function RegisterProject() {
   const [name, setName] = useState('')
   const [registrationSecret, setRegistrationSecret] = useState('')
+  const [allowGroupChat, setAllowGroupChat] = useState(true)
+  const [allowDirectChat, setAllowDirectChat] = useState(true)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -28,7 +30,11 @@ function RegisterProject() {
           'Content-Type': 'application/json',
           'X-REGISTRATION-SECRET': registrationSecret,
         },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+          allowGroupChat,
+          allowDirectChat,
+        }),
       })
       const data = await res.json()
       if (res.ok) setResult(data)
@@ -85,6 +91,31 @@ function RegisterProject() {
             required
             sx={{ mb: 2 }}
           />
+          <Box sx={{ mb: 2, display: "flex", flexDirection: "column", gap: 0.5, bgcolor: "#f9fafb", p: 1.5, borderRadius: 2 }}>
+            <Typography variant="body2" fontWeight={600} color="text.secondary">
+              Chat Features:
+            </Typography>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={allowGroupChat}
+                  onChange={(e) => setAllowGroupChat(e.target.checked)}
+                />
+              }
+              label={<Typography variant="body2">Group Chat</Typography>}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={allowDirectChat}
+                  onChange={(e) => setAllowDirectChat(e.target.checked)}
+                />
+              }
+              label={<Typography variant="body2">Individual Chat (Direct Messaging)</Typography>}
+            />
+          </Box>
           <Button
             type="submit"
             variant="contained"
@@ -109,6 +140,9 @@ function RegisterProject() {
             </Typography>
             <Typography variant="caption" display="block" color="text.secondary">
               <strong>Project ID:</strong> {result.id}
+            </Typography>
+            <Typography variant="caption" display="block" color="text.secondary">
+              <strong>Features:</strong> {result.allowGroupChat ? "Group Chat" : "No Group"} · {result.allowDirectChat ? "Individual Chat" : "No Direct"}
             </Typography>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
               <Typography variant="caption" sx={{ bgcolor: '#f5f5f5', px: 1, py: 0.5, borderRadius: 1, fontFamily: 'monospace', fontSize: '0.75rem', wordBreak: 'break-all' }}>

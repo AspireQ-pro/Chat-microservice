@@ -38,6 +38,7 @@ function GroupItem({ room, active, unread = 0, onClick }) {
     >
       {/* Avatar */}
       <Avatar
+        src={room.avatarUrl || undefined}
         sx={{
           bgcolor: active ? "#3C4F4A" : "#7b68ee",
           width: 46,
