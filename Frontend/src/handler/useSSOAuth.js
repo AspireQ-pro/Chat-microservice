@@ -15,24 +15,41 @@ function decodeToken(token) {
 }
 
 function resolveUserCapabilities(decoded, params) {
-  if (!decoded) {
-    return { allowGroupChat: true, allowDirectChat: true };
-  }
-
   const urlDirect = params?.get("allowDirectChat");
   const urlGroup = params?.get("allowGroupChat");
 
-  const allowDirect = urlDirect !== null
-    ? urlDirect === "true"
-    : Boolean(decoded.allowDirectChat);
+  let allowDirect = urlDirect !== null ? urlDirect === "true" : undefined;
+  let allowGroup = urlGroup !== null ? urlGroup === "true" : undefined;
 
-  const allowGroup = urlGroup !== null
-    ? urlGroup === "true"
-    : Boolean(decoded.allowGroupChat);
+  if (decoded) {
+    if (allowDirect === undefined) {
+      if (decoded.allowDirectChat !== undefined) allowDirect = Boolean(decoded.allowDirectChat);
+      else if (decoded.allowIndividualChat !== undefined) allowDirect = Boolean(decoded.allowIndividualChat);
+      else if (decoded.individualChat !== undefined) allowDirect = Boolean(decoded.individualChat);
+      else if (decoded.directChat !== undefined) allowDirect = Boolean(decoded.directChat);
+      else if (decoded.oneToOneChat !== undefined) allowDirect = Boolean(decoded.oneToOneChat);
+    }
+
+    if (allowGroup === undefined) {
+      if (decoded.allowGroupChat !== undefined) allowGroup = Boolean(decoded.allowGroupChat);
+      else if (decoded.groupChat !== undefined) allowGroup = Boolean(decoded.groupChat);
+    }
+
+    const subFeatures = decoded.subFeatures?.CHAT || decoded.subFeatures?.chat || decoded.subFeatures?.Chat;
+    if (Array.isArray(subFeatures) && subFeatures.length > 0) {
+      const normalized = subFeatures.map((s) => String(s).toUpperCase().replace(/\s+/g, "_"));
+      if (allowGroup === undefined) {
+        allowGroup = normalized.includes("GROUP_CHAT");
+      }
+      if (allowDirect === undefined) {
+        allowDirect = normalized.includes("INDIVIDUAL_CHAT") || normalized.includes("DIRECT_CHAT");
+      }
+    }
+  }
 
   return {
-    allowGroupChat: allowGroup,
-    allowDirectChat: allowDirect,
+    allowGroupChat: Boolean(allowGroup),
+    allowDirectChat: Boolean(allowDirect),
   };
 }
 

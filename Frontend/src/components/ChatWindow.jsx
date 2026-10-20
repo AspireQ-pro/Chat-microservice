@@ -48,8 +48,8 @@ function ChatWindow({
 }) {
   const fileInputRef = useRef(null);
   const user = useSelector((s) => s.auth.user);
-  const allowGroupChat = user?.allowGroupChat !== false;
-  const allowDirectChat = user?.allowDirectChat !== false;
+  const allowGroupChat = Boolean(user?.allowGroupChat);
+  const allowDirectChat = Boolean(user?.allowDirectChat);
 
   if (!activeContact) {
     return (

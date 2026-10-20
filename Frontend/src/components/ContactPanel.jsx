@@ -103,8 +103,8 @@ function ContactPanel({
   setShowPanel,
 }) {
   const user = useSelector((s) => s.auth.user);
-  const allowGroupChat = user?.allowGroupChat !== false;
-  const allowDirectChat = user?.allowDirectChat !== false;
+  const allowGroupChat = Boolean(user?.allowGroupChat);
+  const allowDirectChat = Boolean(user?.allowDirectChat);
   const showTabs = allowGroupChat && allowDirectChat;
 
   const [activeTab, setActiveTab] = useState(0); // 0 = Direct Chats, 1 = Groups
