@@ -240,16 +240,71 @@ async function serializeRoomForUser(room, userId) {
   };
 }
 
-// ─── Middleware: Resolve project from X-API-KEY (for server-to-server calls) ─
+// ─── Middleware: Resolve project from X-API-KEY or societyId ───────────────
 
 async function resolveProject(req, res, next) {
   const apiKey = req.headers["x-api-key"];
-  if (!apiKey)
-    return res.status(401).json({ error: "X-API-KEY header is required" });
+  const societyId =
+    req.headers["x-society-id"] ||
+    req.headers["society-id"] ||
+    req.headers["societyid"] ||
+    req.body?.societyId ||
+    req.query?.societyId ||
+    req.body?.projectId ||
+    req.query?.projectId;
+
+  if (!apiKey && !societyId) {
+    return res.status(401).json({ error: "X-API-KEY or societyId is required" });
+  }
 
   try {
-    const project = await prisma.project.findUnique({ where: { apiKey } });
-    if (!project) return res.status(401).json({ error: "Invalid API key" });
+    let project = null;
+
+    if (apiKey) {
+      project = await prisma.project.findUnique({ where: { apiKey } });
+    }
+
+    if (!project && societyId) {
+      const societyStr = String(societyId).trim();
+      const isUuid =
+        /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+          societyStr,
+        );
+
+      project = await prisma.project.findFirst({
+        where: {
+          OR: [
+            ...(isUuid ? [{ id: societyStr }] : []),
+            { apiKey: societyStr },
+            { name: societyStr },
+            { name: `Society ${societyStr}` },
+            { name: `society_${societyStr}` },
+            { name: `society-${societyStr}` },
+          ],
+        },
+      });
+
+      // Auto-create project for the society if it doesn't exist yet
+      if (!project) {
+        const capabilities = resolveChatCapabilities(req.body);
+        const projectName =
+          req.body?.societyName || req.body?.name || `Society ${societyStr}`;
+        project = await prisma.project.create({
+          data: {
+            name: projectName,
+            apiKey: generateApiKey(),
+            plan: capabilities.plan || "custom",
+            allowGroupChat: capabilities.allowGroupChat ?? true,
+            allowDirectChat: capabilities.allowDirectChat ?? true,
+          },
+        });
+        console.log(
+          `[resolveProject] Auto-created project "${project.name}" (${project.id}) for societyId=${societyStr}`,
+        );
+      }
+    }
+
+    if (!project) return res.status(401).json({ error: "Invalid API key or society ID" });
     if (!project.isActive)
       return res.status(403).json({ error: "Project is deactivated" });
     req.project = project;
@@ -533,109 +588,118 @@ app.patch(
 //    Server-to-server: X-API-KEY identifies the project, body has user details
 // ═════════════════════════════════════════════════════════════════════════════
 
-app.post(
-  `${API_BASE}/users/sync`,
-  resolveProject,
-  asyncHandler(async (req, res) => {
-    const { id, name, email, role } = req.body || {};
-    if (!id || !name) {
-      return sendError(res, 400, "id and name are required");
-    }
+const handleSyncUser = asyncHandler(async (req, res) => {
+  const { id, name, email, role } = req.body || {};
+  if (!id || !name) {
+    return sendError(res, 400, "id and name are required");
+  }
 
-    const safeEmail =
-      email && String(email).trim()
-        ? String(email).trim()
-        : `${String(id)}@noemail.local`;
-    const safeRole = role && String(role).trim() ? String(role).trim() : null;
+  const safeEmail =
+    email && String(email).trim()
+      ? String(email).trim()
+      : `${String(id)}@noemail.local`;
+  const safeRole = role && String(role).trim() ? String(role).trim() : null;
 
-    let chatUser = await prisma.chatUser.findUnique({
-      where: {
-        projectId_externalUserId: {
-          projectId: req.project.id,
-          externalUserId: String(id),
-        },
+  let chatUser = await prisma.chatUser.findUnique({
+    where: {
+      projectId_externalUserId: {
+        projectId: req.project.id,
+        externalUserId: String(id),
+      },
+    },
+  });
+
+  if (!chatUser) {
+    chatUser = await prisma.chatUser.create({
+      data: {
+        projectId: req.project.id,
+        externalUserId: String(id),
+        name: String(name),
+        email: safeEmail,
+        role: safeRole,
       },
     });
+  } else {
+    chatUser = await prisma.chatUser.update({
+      where: { id: chatUser.id },
+      data: { name: String(name), email: safeEmail, role: safeRole },
+    });
+  }
 
-    if (!chatUser) {
-      chatUser = await prisma.chatUser.create({
-        data: {
-          projectId: req.project.id,
-          externalUserId: String(id),
-          name: String(name),
-          email: safeEmail,
-          role: safeRole,
-        },
-      });
-    } else {
-      chatUser = await prisma.chatUser.update({
-        where: { id: chatUser.id },
-        data: { name: String(name), email: safeEmail, role: safeRole },
-      });
-    }
+  const capabilities = resolveChatCapabilities(req.body, req.project);
 
-    const capabilities = resolveChatCapabilities(req.body, req.project);
-
-    if (
-      req.project &&
-      (req.project.allowGroupChat !== capabilities.allowGroupChat ||
-        req.project.allowDirectChat !== capabilities.allowDirectChat ||
-        req.project.plan !== capabilities.plan) &&
-      (req.body.allowGroupChat !== undefined ||
-        req.body.groupChat !== undefined ||
-        req.body.allowDirectChat !== undefined ||
-        req.body.allowIndividualChat !== undefined ||
-        req.body.individualChat !== undefined ||
-        req.body.subFeatures !== undefined ||
-        req.body.features !== undefined ||
-        (typeof req.body.plan === "object" && req.body.plan !== null))
-    ) {
-      await prisma.project.update({
-        where: { id: req.project.id },
-        data: {
-          plan: capabilities.plan,
-          allowGroupChat: capabilities.allowGroupChat,
-          allowDirectChat: capabilities.allowDirectChat,
-        },
-      });
-      req.project.plan = capabilities.plan;
-      req.project.allowGroupChat = capabilities.allowGroupChat;
-      req.project.allowDirectChat = capabilities.allowDirectChat;
-    }
-
-    const chatToken = jwt.sign(
-      {
-        userId: chatUser.id,
-        projectId: req.project.id,
-        name: chatUser.name,
-        email: chatUser.email,
+  if (
+    req.project &&
+    (req.project.allowGroupChat !== capabilities.allowGroupChat ||
+      req.project.allowDirectChat !== capabilities.allowDirectChat ||
+      req.project.plan !== capabilities.plan) &&
+    (req.body.allowGroupChat !== undefined ||
+      req.body.groupChat !== undefined ||
+      req.body.allowDirectChat !== undefined ||
+      req.body.allowIndividualChat !== undefined ||
+      req.body.individualChat !== undefined ||
+      req.body.subFeatures !== undefined ||
+      req.body.features !== undefined ||
+      (typeof req.body.plan === "object" && req.body.plan !== null))
+  ) {
+    await prisma.project.update({
+      where: { id: req.project.id },
+      data: {
         plan: capabilities.plan,
         allowGroupChat: capabilities.allowGroupChat,
         allowDirectChat: capabilities.allowDirectChat,
       },
-      CHAT_JWT_SECRET,
-      { expiresIn: "24h" },
-    );
+    });
+    req.project.plan = capabilities.plan;
+    req.project.allowGroupChat = capabilities.allowGroupChat;
+    req.project.allowDirectChat = capabilities.allowDirectChat;
+  }
 
-    res.json({
-      success: true,
-      token: chatToken,
-      chatUrl: CHAT_FRONTEND_URL,
+  const chatToken = jwt.sign(
+    {
+      userId: chatUser.id,
       projectId: req.project.id,
+      name: chatUser.name,
+      email: chatUser.email,
       plan: capabilities.plan,
       allowGroupChat: capabilities.allowGroupChat,
       allowDirectChat: capabilities.allowDirectChat,
+    },
+    CHAT_JWT_SECRET,
+    { expiresIn: "24h" },
+  );
+
+  res.json({
+    success: true,
+    token: chatToken,
+    chatUrl: CHAT_FRONTEND_URL,
+    projectId: req.project.id,
+    plan: capabilities.plan,
+    allowGroupChat: capabilities.allowGroupChat,
+    allowDirectChat: capabilities.allowDirectChat,
+    user: {
+      id: chatUser.id,
+      name: chatUser.name,
+      email: chatUser.email,
+      plan: capabilities.plan,
+      allowGroupChat: capabilities.allowGroupChat,
+      allowDirectChat: capabilities.allowDirectChat,
+    },
+    data: {
+      token: chatToken,
+      chatUrl: CHAT_FRONTEND_URL,
+      projectId: req.project.id,
       user: {
         id: chatUser.id,
         name: chatUser.name,
         email: chatUser.email,
-        plan: capabilities.plan,
-        allowGroupChat: capabilities.allowGroupChat,
-        allowDirectChat: capabilities.allowDirectChat,
       },
-    });
-  }),
-);
+    },
+  });
+});
+
+app.post(`${API_BASE}/users/sync`, resolveProject, handleSyncUser);
+app.post(`${API_BASE}/chat/session`, resolveProject, handleSyncUser);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 2b. BULK SYNC USERS — Project's backend pushes its whole member list so every
