@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const fs = require("fs");
@@ -142,13 +142,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function generateApiKey() {
   return "ck_" + crypto.randomBytes(32).toString("hex");
 }
 
-// ─── Message encryption at rest (AES-256-GCM) ───────────────────────────────
+// â”€â”€â”€ Message encryption at rest (AES-256-GCM) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Content is encrypted before it is written to Postgres and decrypted when
 // served. The server can still read messages (this is encryption-at-rest, not
 // end-to-end), which protects against raw database exposure. Legacy plaintext
@@ -192,7 +192,7 @@ function encryptContent(plain) {
 function decryptContent(stored) {
   if (stored == null) return stored;
   if (typeof stored !== "string" || !stored.startsWith(ENC_PREFIX)) {
-    return stored; // legacy plaintext or non-string — return untouched
+    return stored; // legacy plaintext or non-string â€” return untouched
   }
   try {
     const raw = Buffer.from(stored.slice(ENC_PREFIX.length), "base64");
@@ -210,7 +210,7 @@ function decryptContent(stored) {
     );
   } catch (err) {
     console.error("decryptContent error", err);
-    return ""; // corrupt/undecryptable — return empty rather than throwing
+    return ""; // corrupt/undecryptable â€” return empty rather than throwing
   }
 }
 
@@ -240,7 +240,7 @@ async function serializeRoomForUser(room, userId) {
   };
 }
 
-// ─── Middleware: Resolve project from X-API-KEY or societyId ───────────────
+// â”€â”€â”€ Middleware: Resolve project from X-API-KEY or societyId â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function resolveProject(req, res, next) {
   const apiKey = req.headers["x-api-key"];
@@ -315,7 +315,7 @@ async function resolveProject(req, res, next) {
   }
 }
 
-// ─── Middleware: Authenticate chat JWT (for frontend requests) ─────────────
+// â”€â”€â”€ Middleware: Authenticate chat JWT (for frontend requests) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function authenticateChatJWT(req, res, next) {
   const header = req.headers["authorization"];
@@ -345,7 +345,7 @@ function parseFeatureFlag(val) {
   return undefined;
 }
 
-// ─── Resolve Plan & Chat Capabilities ──────────────────────────────────────
+// â”€â”€â”€ Resolve Plan & Chat Capabilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function resolveChatCapabilities(body = {}, existingProject = null) {
   let allowGroup;
   if (body.allowGroupChat !== undefined) {
@@ -432,7 +432,7 @@ function resolveChatCapabilities(body = {}, existingProject = null) {
     allowDirect = parseFeatureFlag(existingProject.allowDirectChat);
   }
 
-  // Plan name is metadata only — it never determines feature availability
+  // Plan name is metadata only â€” it never determines feature availability
   const planName =
     typeof body.plan === "string" && body.plan.trim()
       ? body.plan.trim()
@@ -487,15 +487,15 @@ async function getProjectPermissions(projectId, reqOrSocket = {}) {
   };
 }
 
-// ─── Health ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Health â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.get("/", (req, res) => {
   res.json({ status: "Chat service is running" });
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 1. REGISTER PROJECT — Admin creates a project and gets an API key
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 1. REGISTER PROJECT â€” Admin creates a project and gets an API key
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 app.post(
   `${API_BASE}/projects`,
@@ -583,10 +583,10 @@ app.patch(
   }),
 );
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 2. SYNC USER — Project's backend calls this when a user clicks "Chat"
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 2. SYNC USER â€” Project's backend calls this when a user clicks "Chat"
 //    Server-to-server: X-API-KEY identifies the project, body has user details
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const handleSyncUser = asyncHandler(async (req, res) => {
   const { id, name, email, role } = req.body || {};
@@ -700,12 +700,29 @@ const handleSyncUser = asyncHandler(async (req, res) => {
 
 app.post(`${API_BASE}/users/sync`, resolveProject, handleSyncUser);
 app.post(`${API_BASE}/chat/session`, resolveProject, handleSyncUser);
+// ── GET /api/projects/current — returns the project ID for a given API key ──
+// Server-to-server: X-API-KEY identifies the project. Used by the RBAC service
+// to backfill chatProjectId for societies that have a chatApiKey but no projectId.
+app.get(
+  `${API_BASE}/projects/current`,
+  resolveProject,
+  (req, res) => {
+    res.json({
+      id: req.project.id,
+      name: req.project.name,
+      plan: req.project.plan,
+      allowGroupChat: req.project.allowGroupChat,
+      allowDirectChat: req.project.allowDirectChat,
+      isActive: req.project.isActive,
+    });
+  },
+);
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 2b. BULK SYNC USERS — Project's backend pushes its whole member list so every
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 2b. BULK SYNC USERS â€” Project's backend pushes its whole member list so every
 //     member appears in chat immediately (not only after they open chat).
 //     Server-to-server: X-API-KEY identifies the project.
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 app.post(
   `${API_BASE}/users/bulk-sync`,
@@ -760,9 +777,9 @@ app.post(
   }),
 );
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 3. SEARCH USERS — Only within the same project
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 3. SEARCH USERS â€” Only within the same project
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
   const { excludeId, q } = req.query;
@@ -785,9 +802,9 @@ app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
   }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 4. ROOMS — Scoped by project
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 4. ROOMS â€” Scoped by project
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // List rooms for a user
 app.get(
@@ -1080,7 +1097,7 @@ app.post(
   },
 );
 
-// ─── Upload group avatar (before the room is created) ────────────────────────
+// â”€â”€â”€ Upload group avatar (before the room is created) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // POST /api/rooms/group/avatar
 // Authenticated; returns { avatarUrl } which callers pass into POST /rooms/group.
 app.post(
@@ -1132,7 +1149,7 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
       .json({ error: "name and memberIds are required" });
   }
 
-  // Validate the avatarUrl if provided — must be a URL served by this backend.
+  // Validate the avatarUrl if provided â€” must be a URL served by this backend.
   const safeAvatarUrl = (() => {
     if (!avatarUrl) return null;
     try {
@@ -1289,7 +1306,7 @@ app.get(
   }),
 );
 
-// ─── Serve general uploads (group avatars etc.) ───────────────────────────────
+// â”€â”€â”€ Serve general uploads (group avatars etc.) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // GET /api/uploads/:filename
 // JWT-protected. Any authenticated member of the same project can load avatars.
 app.get(
@@ -1330,8 +1347,8 @@ app.get(
 //   limit  - page size (default 30, max 100)
 //   before - ISO timestamp; return messages OLDER than this (for "load previous")
 //
-// Returns: { messages: [...oldest→newest], hasMore, nextBefore }
-//   - messages are ordered oldest→newest so the client can append directly
+// Returns: { messages: [...oldestâ†’newest], hasMore, nextBefore }
+//   - messages are ordered oldestâ†’newest so the client can append directly
 //   - hasMore indicates whether older messages exist beyond this page
 //   - nextBefore is the cursor to pass as `before` to fetch the previous page
 app.get(
@@ -1382,7 +1399,7 @@ app.get(
 
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
-      // Reverse to oldest→newest for display, decrypting content.
+      // Reverse to oldestâ†’newest for display, decrypting content.
       const roomMembers = await prisma.chatRoomMember.findMany({
         where: { roomId },
         select: { userId: true, lastReadAt: true },
@@ -1415,9 +1432,9 @@ app.get(
   },
 );
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 5. READ RECEIPTS — Mark messages as read when user opens a room
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 5. READ RECEIPTS â€” Mark messages as read when user opens a room
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 app.post(`${API_BASE}/messages/read`, authenticateChatJWT, async (req, res) => {
   // The reader is the authenticated user, not a client-supplied id.
@@ -1545,10 +1562,10 @@ app.get(`${API_BASE}/health`, (req, res) => {
   res.json({ status: "ok", service: "chat" });
 });
 
-// ─── Storage verification (JWT-protected) ────────────────────────────────────
+// â”€â”€â”€ Storage verification (JWT-protected) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Confirms messages are persisting. Scoped to the caller's project.
-//   GET /api/stats                 → project-wide totals
-//   GET /api/rooms/:roomId/count   → count for one room + latest message time
+//   GET /api/stats                 â†’ project-wide totals
+//   GET /api/rooms/:roomId/count   â†’ count for one room + latest message time
 app.get(`${API_BASE}/stats`, authenticateChatJWT, async (req, res) => {
   try {
     const [users, rooms, roomIds] = await Promise.all([
@@ -1598,9 +1615,9 @@ app.get(
   },
 );
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 6. SOCKET.IO — Multi-tenant real-time messaging
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 6. SOCKET.IO â€” Multi-tenant real-time messaging
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const io = new Server(server, { cors: { origin: corsOrigin } });
 const onlineUsers = new Map(); // socketId -> { userId, projectId }
@@ -1815,8 +1832,8 @@ io.on("connection", (socket) => {
           : "text";
         const plainPreview = fileUrl
           ? fileType === "image"
-            ? "📷 Photo"
-            : "📎 File"
+            ? "ðŸ“· Photo"
+            : "ðŸ“Ž File"
           : content?.slice(0, 100) || "";
 
         // Is anyone else in the room currently online? If so, mark delivered now.
@@ -2000,7 +2017,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const PORT = process.env.PORT || 5000;
 server.keepAliveTimeout = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 5000);
@@ -2025,7 +2042,7 @@ process.on("unhandledRejection", (reason) => {
   console.error("unhandledRejection", reason);
 });
 
-// ─── Encryption key self-check ──────────────────────────────────────────────
+// â”€â”€â”€ Encryption key self-check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Verify the encryption key round-trips at boot, and warn loudly if we're on
 // the fallback key (which risks old messages becoming unreadable if the key
 // later changes). This never blocks startup.
@@ -2045,7 +2062,7 @@ process.on("unhandledRejection", (reason) => {
   }
   if (!process.env.MESSAGE_ENC_KEY) {
     console.warn(
-      "[ENCRYPTION] MESSAGE_ENC_KEY is not set — using a key derived from CHAT_JWT_SECRET. " +
+      "[ENCRYPTION] MESSAGE_ENC_KEY is not set â€” using a key derived from CHAT_JWT_SECRET. " +
         "Set a STABLE MESSAGE_ENC_KEY in production; if this key ever changes, previously " +
         "encrypted messages will not decrypt.",
     );
@@ -2067,3 +2084,4 @@ module.exports = {
   parseFeatureFlag,
   prisma,
 };
+
