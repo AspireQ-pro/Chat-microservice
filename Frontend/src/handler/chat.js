@@ -214,6 +214,8 @@ export function useChatHandler() {
     if (!currentUser?.id || !authToken) return;
     const socket =
       authToken !== "dev-mock-token" ? connectSocket(authToken) : null;
+
+    // Initial data load — fetch once on mount, not again on socket connect.
     dispatch(fetchUsers({}));
     dispatch(fetchMyRooms());
     dispatch(fetchChatNotificationSummary());
@@ -225,8 +227,8 @@ export function useChatHandler() {
     const onConnect = () => {
       dispatch(setConnected(true));
       socket.emit("get_online_users");
-      dispatch(fetchMyRooms());
-      dispatch(fetchChatNotificationSummary());
+      // Do NOT re-fetch rooms/notifications here — already done above on mount.
+      // Only re-fetch if we were previously disconnected (reconnect scenario).
       const openRoom = activeRoomIdRef.current;
       if (openRoom) {
         socket.emit("join_room", openRoom);
@@ -241,6 +243,18 @@ export function useChatHandler() {
           clientId: o.clientId,
         });
       });
+    };
+
+    // Track whether this is a reconnect (not the first connect).
+    let connectedOnce = false;
+    const onConnectWithReconnect = () => {
+      if (connectedOnce) {
+        // Reconnect — refresh data that may have changed while offline.
+        dispatch(fetchMyRooms());
+        dispatch(fetchChatNotificationSummary());
+      }
+      connectedOnce = true;
+      onConnect();
     };
     const onDisconnect = () => dispatch(setConnected(false));
     const onOnline = (ids) => dispatch(setOnlineUsers(ids || []));
@@ -273,16 +287,17 @@ export function useChatHandler() {
       dispatch(fetchChatNotificationSummary());
     };
     const onRoomUpd = (p) => {
+      // Update local state directly from the socket payload — avoid a full
+      // fetchMyRooms() network round-trip on every message/room event.
       dispatch(roomUpdated(p || {}));
-      if (p?.roomId) {
+      dispatch(fetchChatNotificationSummary());
+
+      // Only fetch rooms from server when the direct-chat request status
+      // changes (pending → accepted), so the UI can show the new room.
+      if (p?.directStatus === "pending" && p?.requestedById !== myChatId && selectedContactIdRef.current) {
         dispatch(fetchMyRooms())
           .unwrap()
           .then((updatedRooms) => {
-            if (
-              p.directStatus !== "pending" ||
-              p.requestedById === myChatId ||
-              !selectedContactIdRef.current
-            ) return;
             const requestRoom = updatedRooms.find((room) => room.id === p.roomId);
             const otherMember = requestRoom?.members?.find(
               (member) => member.userId !== myChatId,
@@ -292,12 +307,11 @@ export function useChatHandler() {
             }
           })
           .catch(() => {});
-        dispatch(fetchChatNotificationSummary());
       }
     };
     const onGroupCreated = (p) => dispatch(groupCreated(p || {}));
 
-    socket.on("connect", onConnect);
+    socket.on("connect", onConnectWithReconnect);
     socket.on("disconnect", onDisconnect);
     socket.on("online_users", onOnline);
     socket.on("user_offline", onOffline);
@@ -308,10 +322,10 @@ export function useChatHandler() {
     socket.on("room_updated", onRoomUpd);
     socket.on("group_created", onGroupCreated);
 
-    if (socket.connected) onConnect();
+    if (socket.connected) onConnectWithReconnect();
 
     return () => {
-      socket.off("connect", onConnect);
+      socket.off("connect", onConnectWithReconnect);
       socket.off("disconnect", onDisconnect);
       socket.off("online_users", onOnline);
       socket.off("user_offline", onOffline);
