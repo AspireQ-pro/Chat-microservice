@@ -3,6 +3,7 @@ import {
   Box, Typography, Avatar, TextField, Button,
   CircularProgress, Alert, Dialog, Slide,
   IconButton, InputAdornment, Chip,
+  Snackbar,
 } from '@mui/material'
 import {
   ArrowBackIos, Close, Search, Check,
@@ -52,6 +53,7 @@ function CreateGroupDialog({
   const isMobileOrTablet = useMediaQuery(theme.breakpoints.down('md')) // < 900px
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [photoError, setPhotoError] = useState('')
+  const [toastOpen, setToastOpen] = useState(false)
 
   const [step, setStep] = useState(1)          // 1 = select members, 2 = group details
   const [memberSearch, setMemberSearch] = useState('')
@@ -297,7 +299,13 @@ function CreateGroupDialog({
           fullWidth
           variant="contained"
           disabled={groupMemberIds.length === 0}
-          onClick={() => setStep(2)}
+          onClick={() => {
+            if (groupMemberIds.length < 2) {
+              setToastOpen(true)
+              return
+            }
+            setStep(2)
+          }}
           endIcon={<span style={{ fontSize: '1rem' }}>→</span>}
           sx={{
             bgcolor: '#2D4A44',
@@ -585,6 +593,25 @@ function CreateGroupDialog({
   /* ════════════════════════════════════════
      RENDER
   ════════════════════════════════════════ */
+  const Toast = (
+    <Snackbar
+      open={toastOpen}
+      autoHideDuration={3500}
+      onClose={() => setToastOpen(false)}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      message="A group needs at least 2 other members. Please add more people."
+      ContentProps={{
+        sx: {
+          bgcolor: '#2D4A44',
+          color: '#fff',
+          borderRadius: '10px',
+          fontWeight: 500,
+          fontSize: '0.85rem',
+        },
+      }}
+    />
+  )
+
   if (isMobileOrTablet) {
     // Fullscreen slide-up on mobile / tablet
     return (
@@ -631,6 +658,7 @@ function CreateGroupDialog({
             {Step2}
           </Box>
         </Box>
+        {Toast}
       </Dialog>
     )
   }
@@ -692,6 +720,7 @@ function CreateGroupDialog({
           {Step2}
         </Box>
       </Box>
+      {Toast}
     </Dialog>
   )
 }
