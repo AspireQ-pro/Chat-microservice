@@ -1228,6 +1228,37 @@ app.get(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, async (req, res) => {
   }
 });
 
+// Leave a group room (member removes themselves)
+app.delete(`${API_BASE}/rooms/:roomId/members/me`, authenticateChatJWT, async (req, res) => {
+  const { roomId } = req.params;
+  try {
+    const room = await prisma.chatRoom.findFirst({
+      where: { id: roomId, projectId: req.projectId, isGroup: true },
+      include: { members: { select: { userId: true } } },
+    });
+    if (!room) return res.status(404).json({ error: "Room not found" });
+
+    const isMember = room.members.some((m) => m.userId === req.userId);
+    if (!isMember) return res.status(403).json({ error: "Not a member of this room" });
+
+    await prisma.chatRoomMember.delete({
+      where: { roomId_userId: { roomId, userId: req.userId } },
+    });
+
+    // Notify remaining members that the room roster changed
+    const remaining = room.members
+      .map((m) => m.userId)
+      .filter((id) => id !== req.userId);
+    for (const uid of remaining) {
+      io.to(`user:${uid}`).emit("member_left", { roomId, userId: req.userId });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post(
   `${API_BASE}/rooms/:roomId/upload`,
   authenticateChatJWT,

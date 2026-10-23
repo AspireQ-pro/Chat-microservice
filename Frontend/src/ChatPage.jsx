@@ -1,12 +1,15 @@
 import React, { useState } from "react";
 import { Paper } from "@mui/material";
+import { useDispatch } from "react-redux";
 import { useChatHandler } from "@/handler/chat";
+import { leaveGroup } from "@/provider/chatSlice";
 import ContactPanel from "@/components/ContactPanel";
 import ChatWindow from "@/components/ChatWindow";
 import CreateGroupDialog from "@/components/CreateGroupDialog";
 import GroupMembersDialog from "@/components/GroupMembersDialog";
 
 function ChatPage() {
+  const dispatch = useDispatch();
   const {
     input,
     search,
@@ -146,6 +149,8 @@ function ChatPage() {
         open={membersDialogOpen}
         onClose={() => setMembersDialogOpen(false)}
         room={activeRoom}
+        currentUserId={chatUserId}
+        onLeave={(roomId) => dispatch(leaveGroup(roomId)).unwrap()}
       />
     </Paper>
   );

@@ -294,6 +294,23 @@ export const fetchOlderMessages = createAsyncThunk(
   },
 );
 
+export const leaveGroup = createAsyncThunk(
+  "chat/leaveGroup",
+  async (roomId, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/rooms/${roomId}/members/me`, {
+        method: "DELETE",
+        headers: authHeaders(getState),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to leave group");
+      return { roomId };
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 export const markMessagesRead = createAsyncThunk(
   "chat/markMessagesRead",
   async ({ roomId }, { getState }) => {
@@ -497,6 +514,13 @@ const chatSlice = createSlice({
         if (lastSeenAt) c.lastSeenAt = lastSeenAt;
       }
     },
+    removeRoom(state, { payload: roomId }) {
+      state.rooms = state.rooms.filter((r) => r.id !== roomId);
+      if (state.activeRoomId === roomId) state.activeRoomId = null;
+      delete state.messages[roomId];
+      delete state.pagination[roomId];
+      delete state.unreadCounts[roomId];
+    },
     clearChat(state) {
       state.contacts = [];
       state.rooms = [];
@@ -631,6 +655,15 @@ const chatSlice = createSlice({
       const { roomId } = payload;
       state.unreadCounts[roomId] = 0;
     });
+
+    builder.addCase(leaveGroup.fulfilled, (state, { payload }) => {
+      const { roomId } = payload;
+      state.rooms = state.rooms.filter((r) => r.id !== roomId);
+      if (state.activeRoomId === roomId) state.activeRoomId = null;
+      delete state.messages[roomId];
+      delete state.pagination[roomId];
+      delete state.unreadCounts[roomId];
+    });
   },
 });
 
@@ -650,6 +683,7 @@ export const {
   setConnected,
   setOnlineUsers,
   userOffline,
+  removeRoom,
   clearChat,
 } = chatSlice.actions;
 
