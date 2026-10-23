@@ -17,7 +17,7 @@ import ContactItem from "./ContactItem";
 import GroupItem from "./GroupItem";
 import { useSelector } from "react-redux";
 
-function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, handleSelectRoom }) {
+function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, handleSelectRoom, onGroupInfoClick }) {
   return (
     <>
       {/* Groups section header with add button */}
@@ -78,6 +78,7 @@ function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, h
               active={room.id === activeRoomId}
               unread={unreadCounts[room.id] || 0}
               onClick={() => handleSelectRoom(room)}
+              onInfoClick={onGroupInfoClick}
             />
           ))
         )}
@@ -101,6 +102,7 @@ function ContactPanel({
   activeRoomId,
   openGroupDialog,
   setShowPanel,
+  onGroupInfoClick,
 }) {
   const user = useSelector((s) => s.auth.user);
   const allowGroupChat = Boolean(user?.allowGroupChat);
@@ -343,6 +345,7 @@ function ContactPanel({
             unreadCounts={unreadCounts}
             openGroupDialog={openGroupDialog}
             handleSelectRoom={handleSelectRoom}
+            onGroupInfoClick={onGroupInfoClick}
           />
         ) : (
           /* ── Direct / Individual Chats view ── */

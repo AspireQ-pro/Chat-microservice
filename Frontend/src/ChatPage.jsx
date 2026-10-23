@@ -2,11 +2,10 @@ import React, { useState } from "react";
 import { Paper } from "@mui/material";
 import { useDispatch } from "react-redux";
 import { useChatHandler } from "@/handler/chat";
-import { leaveGroup } from "@/provider/chatSlice";
 import ContactPanel from "@/components/ContactPanel";
 import ChatWindow from "@/components/ChatWindow";
 import CreateGroupDialog from "@/components/CreateGroupDialog";
-import GroupMembersDialog from "@/components/GroupMembersDialog";
+import GroupInfoDialog from "@/components/GroupInfoDialog";
 
 function ChatPage() {
   const dispatch = useDispatch();
@@ -57,7 +56,17 @@ function ChatPage() {
     handleCreateGroup,
   } = useChatHandler();
 
-  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
+  const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  const [groupInfoRoomId, setGroupInfoRoomId] = useState(null);
+
+  // Opens the info dialog for any group room (from sidebar click or header click)
+  const openGroupInfo = (room) => {
+    setGroupInfoRoomId((room || activeRoom)?.id || null);
+    setGroupInfoOpen(true);
+  };
+
+  // Always use the latest room data from Redux
+  const groupInfoRoom = rooms.find((r) => r.id === (groupInfoRoomId || activeRoomId)) || activeRoom;
 
   const panel = (
     <ContactPanel
@@ -75,6 +84,7 @@ function ChatPage() {
       activeRoomId={activeRoomId}
       openGroupDialog={openGroupDialog}
       setShowPanel={setShowPanel}
+      onGroupInfoClick={openGroupInfo}
     />
   );
 
@@ -102,7 +112,7 @@ function ChatPage() {
       handleSend={handleSend}
       handleKeyDown={handleKeyDown}
       setShowPanel={setShowPanel}
-      onViewMembers={() => setMembersDialogOpen(true)}
+      onViewMembers={() => openGroupInfo(activeRoom)}
     />
   );
 
@@ -145,12 +155,13 @@ function ChatPage() {
         groupError={groupError}
         handleCreateGroup={handleCreateGroup}
       />
-      <GroupMembersDialog
-        open={membersDialogOpen}
-        onClose={() => setMembersDialogOpen(false)}
-        room={activeRoom}
+
+      <GroupInfoDialog
+        open={groupInfoOpen}
+        onClose={() => setGroupInfoOpen(false)}
+        room={groupInfoRoom || activeRoom}
         currentUserId={chatUserId}
-        onLeave={(roomId) => dispatch(leaveGroup(roomId)).unwrap()}
+        contacts={contacts}
       />
     </Paper>
   );

@@ -233,10 +233,20 @@ async function serializeRoomForUser(room, userId) {
       })
     : 0;
 
+  // The creator is the member who joined first (set at group creation time)
+  let createdById = null;
+  if (room.isGroup && room.members?.length) {
+    const sorted = [...room.members].sort(
+      (a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime()
+    );
+    createdById = sorted[0]?.userId || null;
+  }
+
   return {
     ...room,
     lastMessagePreview: decryptContent(room.lastMessagePreview),
     unreadCount,
+    createdById,
   };
 }
 
@@ -1258,6 +1268,153 @@ app.delete(`${API_BASE}/rooms/:roomId/members/me`, authenticateChatJWT, async (r
     res.status(400).json({ error: err.message });
   }
 });
+
+// ─── Update group info (name / description / avatar) — owner only ─────────────
+// PATCH /api/rooms/:roomId
+app.patch(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (req, res) => {
+  const { roomId } = req.params;
+  const room = await prisma.chatRoom.findFirst({
+    where: { id: roomId, projectId: req.projectId, isGroup: true },
+    include: { members: { orderBy: { joinedAt: 'asc' }, select: { userId: true, joinedAt: true } } },
+  });
+  if (!room) return sendError(res, 404, 'Group not found');
+
+  // Only the first member (creator) may update group info
+  const creatorId = room.members[0]?.userId;
+  if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can edit group info');
+
+  const { name, description, avatarUrl } = req.body;
+  const updateData = {};
+
+  if (name !== undefined) {
+    const trimmed = String(name || '').trim().slice(0, 50);
+    if (!trimmed) return sendError(res, 400, 'Group name cannot be empty');
+    updateData.name = trimmed;
+  }
+
+  if (description !== undefined) {
+    updateData.description = description
+      ? String(description).trim().slice(0, 500)
+      : null;
+  }
+
+  if (avatarUrl !== undefined) {
+    if (!avatarUrl) {
+      updateData.avatarUrl = null;
+    } else {
+      try {
+        const u = new URL(String(avatarUrl));
+        const base = new URL(BACKEND_URL);
+        if (u.origin !== base.origin || !u.pathname.startsWith(`${API_BASE}/uploads/`)) {
+          return sendError(res, 400, 'Invalid avatar URL');
+        }
+        const filename = path.basename(u.pathname);
+        if (!/^[0-9a-f-]{36}\.(jpg|png|gif|webp)$/i.test(filename)) {
+          return sendError(res, 400, 'Invalid avatar file');
+        }
+        updateData.avatarUrl = avatarUrl;
+      } catch {
+        return sendError(res, 400, 'Invalid avatar URL');
+      }
+    }
+  }
+
+  if (!Object.keys(updateData).length) return sendError(res, 400, 'Nothing to update');
+
+  const updated = await prisma.chatRoom.update({
+    where: { id: roomId },
+    data: updateData,
+    include: { members: { include: { user: true } } },
+  });
+
+  // Notify all members
+  for (const m of updated.members) {
+    const memberRoom = await serializeRoomForUser(updated, m.userId);
+    io.to(`user:${m.userId}`).emit('group_updated', { room: memberRoom });
+  }
+
+  res.json(await serializeRoomForUser(updated, req.userId));
+}));
+
+// ─── Add members to a group — owner only ──────────────────────────────────────
+// POST /api/rooms/:roomId/members
+app.post(`${API_BASE}/rooms/:roomId/members`, authenticateChatJWT, asyncHandler(async (req, res) => {
+  const { roomId } = req.params;
+  const room = await prisma.chatRoom.findFirst({
+    where: { id: roomId, projectId: req.projectId, isGroup: true },
+    include: { members: { orderBy: { joinedAt: 'asc' }, include: { user: true } } },
+  });
+  if (!room) return sendError(res, 404, 'Group not found');
+
+  const creatorId = room.members[0]?.userId;
+  if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can add members');
+
+  const { memberIds } = req.body;
+  if (!Array.isArray(memberIds) || !memberIds.length) {
+    return sendError(res, 400, 'memberIds array is required');
+  }
+
+  const existingIds = new Set(room.members.map((m) => m.userId));
+  const newIds = memberIds.filter((id) => !existingIds.has(id));
+  if (!newIds.length) return sendError(res, 400, 'All users are already members');
+
+  const validCount = await prisma.chatUser.count({
+    where: { projectId: req.projectId, id: { in: newIds } },
+  });
+  if (validCount !== newIds.length) {
+    return sendError(res, 403, 'Some users do not belong to this project');
+  }
+
+  await prisma.chatRoomMember.createMany({
+    data: newIds.map((userId) => ({ roomId, userId })),
+    skipDuplicates: true,
+  });
+
+  const updatedRoom = await prisma.chatRoom.findFirst({
+    where: { id: roomId },
+    include: { members: { include: { user: true } } },
+  });
+
+  // Notify all members (existing + new)
+  for (const m of updatedRoom.members) {
+    const memberRoom = await serializeRoomForUser(updatedRoom, m.userId);
+    io.to(`user:${m.userId}`).emit('group_updated', { room: memberRoom });
+  }
+
+  res.json(await serializeRoomForUser(updatedRoom, req.userId));
+}));
+
+// ─── Remove a member from a group — owner only ────────────────────────────────
+// DELETE /api/rooms/:roomId/members/:userId
+app.delete(`${API_BASE}/rooms/:roomId/members/:targetUserId`, authenticateChatJWT, asyncHandler(async (req, res) => {
+  const { roomId, targetUserId } = req.params;
+  const room = await prisma.chatRoom.findFirst({
+    where: { id: roomId, projectId: req.projectId, isGroup: true },
+    include: { members: { orderBy: { joinedAt: 'asc' }, select: { userId: true, joinedAt: true } } },
+  });
+  if (!room) return sendError(res, 404, 'Group not found');
+
+  const creatorId = room.members[0]?.userId;
+  if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can remove members');
+  if (targetUserId === req.userId) return sendError(res, 400, 'Use the leave endpoint to remove yourself');
+
+  const isMember = room.members.some((m) => m.userId === targetUserId);
+  if (!isMember) return sendError(res, 404, 'User is not a member of this group');
+
+  await prisma.chatRoomMember.delete({
+    where: { roomId_userId: { roomId, userId: targetUserId } },
+  });
+
+  // Notify remaining members
+  const remaining = room.members.map((m) => m.userId).filter((id) => id !== targetUserId);
+  for (const uid of remaining) {
+    io.to(`user:${uid}`).emit('member_removed', { roomId, userId: targetUserId });
+  }
+  // Notify the removed user
+  io.to(`user:${targetUserId}`).emit('member_removed', { roomId, userId: targetUserId });
+
+  res.json({ ok: true });
+}));
 
 app.post(
   `${API_BASE}/rooms/:roomId/upload`,

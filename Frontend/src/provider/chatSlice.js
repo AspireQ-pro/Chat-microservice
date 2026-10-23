@@ -311,6 +311,63 @@ export const leaveGroup = createAsyncThunk(
   },
 );
 
+export const updateGroupInfo = createAsyncThunk(
+  "chat/updateGroupInfo",
+  async ({ roomId, name, description, avatarUrl }, { getState, rejectWithValue }) => {
+    try {
+      const body = {};
+      if (name !== undefined) body.name = name;
+      if (description !== undefined) body.description = description;
+      if (avatarUrl !== undefined) body.avatarUrl = avatarUrl;
+      const res = await fetch(`${API_BASE}/rooms/${roomId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders(getState) },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update group");
+      return data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const addGroupMembers = createAsyncThunk(
+  "chat/addGroupMembers",
+  async ({ roomId, memberIds }, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/rooms/${roomId}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(getState) },
+        body: JSON.stringify({ memberIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add members");
+      return data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const removeGroupMember = createAsyncThunk(
+  "chat/removeGroupMember",
+  async ({ roomId, userId }, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/rooms/${roomId}/members/${userId}`, {
+        method: "DELETE",
+        headers: authHeaders(getState),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to remove member");
+      return { roomId, userId };
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 export const markMessagesRead = createAsyncThunk(
   "chat/markMessagesRead",
   async ({ roomId }, { getState }) => {
@@ -494,6 +551,25 @@ const chatSlice = createSlice({
       else state.rooms[existingIndex] = room;
       state.unreadCounts[room.id] = room.unreadCount || 0;
     },
+    groupInfoUpdated(state, { payload }) {
+      const room = payload?.room;
+      if (!room?.id) return;
+      const idx = state.rooms.findIndex((r) => r.id === room.id);
+      if (idx !== -1) {
+        state.rooms[idx] = { ...state.rooms[idx], ...room };
+      } else {
+        state.rooms.unshift(room);
+      }
+    },
+    memberRemovedFromGroup(state, { payload }) {
+      const { roomId, userId } = payload;
+      const idx = state.rooms.findIndex((r) => r.id === roomId);
+      if (idx !== -1 && state.rooms[idx].members) {
+        state.rooms[idx].members = state.rooms[idx].members.filter(
+          (m) => m.userId !== userId
+        );
+      }
+    },
     setConnected(state, { payload }) {
       state.connected = payload;
     },
@@ -664,6 +740,28 @@ const chatSlice = createSlice({
       delete state.pagination[roomId];
       delete state.unreadCounts[roomId];
     });
+
+    builder.addCase(updateGroupInfo.fulfilled, (state, { payload }) => {
+      if (!payload?.id) return;
+      const idx = state.rooms.findIndex((r) => r.id === payload.id);
+      if (idx !== -1) state.rooms[idx] = { ...state.rooms[idx], ...payload };
+    });
+
+    builder.addCase(addGroupMembers.fulfilled, (state, { payload }) => {
+      if (!payload?.id) return;
+      const idx = state.rooms.findIndex((r) => r.id === payload.id);
+      if (idx !== -1) state.rooms[idx] = { ...state.rooms[idx], ...payload };
+    });
+
+    builder.addCase(removeGroupMember.fulfilled, (state, { payload }) => {
+      const { roomId, userId } = payload;
+      const idx = state.rooms.findIndex((r) => r.id === roomId);
+      if (idx !== -1 && state.rooms[idx].members) {
+        state.rooms[idx].members = state.rooms[idx].members.filter(
+          (m) => m.userId !== userId
+        );
+      }
+    });
   },
 });
 
@@ -680,6 +778,8 @@ export const {
   messagesRead,
   roomUpdated,
   groupCreated,
+  groupInfoUpdated,
+  memberRemovedFromGroup,
   setConnected,
   setOnlineUsers,
   userOffline,

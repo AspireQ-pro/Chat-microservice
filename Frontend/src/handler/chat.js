@@ -16,9 +16,12 @@ import {
   messagesRead,
   roomUpdated,
   groupCreated,
+  groupInfoUpdated,
+  memberRemovedFromGroup,
   setConnected,
   setOnlineUsers,
   userOffline,
+  removeRoom,
   fetchUsers,
   fetchMyRooms,
   fetchChatNotificationSummary,
@@ -310,6 +313,16 @@ export function useChatHandler() {
       }
     };
     const onGroupCreated = (p) => dispatch(groupCreated(p || {}));
+    const onGroupUpdated = (p) => dispatch(groupInfoUpdated(p || {}));
+    const onMemberRemoved = (p) => {
+      if (!p?.roomId || !p?.userId) return;
+      // If we are the one removed, drop the room entirely
+      if (p.userId === myChatId) {
+        dispatch(removeRoom(p.roomId));
+      } else {
+        dispatch(memberRemovedFromGroup(p));
+      }
+    };
 
     socket.on("connect", onConnectWithReconnect);
     socket.on("disconnect", onDisconnect);
@@ -321,6 +334,8 @@ export function useChatHandler() {
     socket.on("messages_read", onRead);
     socket.on("room_updated", onRoomUpd);
     socket.on("group_created", onGroupCreated);
+    socket.on("group_updated", onGroupUpdated);
+    socket.on("member_removed", onMemberRemoved);
 
     if (socket.connected) onConnectWithReconnect();
 
@@ -335,6 +350,8 @@ export function useChatHandler() {
       socket.off("messages_read", onRead);
       socket.off("room_updated", onRoomUpd);
       socket.off("group_created", onGroupCreated);
+      socket.off("group_updated", onGroupUpdated);
+      socket.off("member_removed", onMemberRemoved);
     };
   }, [dispatch, currentUser?.id, authToken]);
 
