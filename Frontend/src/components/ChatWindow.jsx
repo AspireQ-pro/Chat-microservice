@@ -159,12 +159,14 @@ function ChatWindow({
         >
           <Avatar
             src={activeContact.avatarUrl || undefined}
+            onClick={activeContact.isGroup ? onViewMembers : undefined}
             sx={{
               bgcolor: activeContact.isGroup ? "#7e57c2" : "#3C4F4A",
               width: 38,
               height: 38,
               fontSize: "0.8rem",
               fontWeight: 700,
+              cursor: activeContact.isGroup ? "pointer" : "default",
             }}
           >
             {activeContact.avatar}
@@ -172,7 +174,10 @@ function ChatWindow({
         </Badge>
 
         {/* Name + status */}
-        <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box
+          sx={{ flex: 1, minWidth: 0, cursor: activeContact.isGroup ? "pointer" : "default" }}
+          onClick={activeContact.isGroup ? onViewMembers : undefined}
+        >
           <Typography variant="body2" fontWeight={700} noWrap>
             {activeContact.name}
           </Typography>

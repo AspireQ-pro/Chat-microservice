@@ -8,13 +8,12 @@ function formatTime(dateStr) {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function GroupItem({ room, active, unread = 0, onClick }) {
+function GroupItem({ room, active, unread = 0, onClick, onInfoClick }) {
   const avatar = room.name?.slice(0, 2).toUpperCase() || "GR";
   const timeLabel = formatTime(room.lastMessageAt || room.createdAt);
 
   return (
     <Box
-      onClick={onClick}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.() }}
@@ -35,10 +34,14 @@ function GroupItem({ room, active, unread = 0, onClick }) {
         "&:hover": { bgcolor: "rgba(0,0,0,0.04)" },
         transition: "background 0.15s",
       }}
+      onClick={onClick}
     >
-      {/* Avatar */}
+      {/* Avatar — clicking opens group info */}
       <Avatar
         src={room.avatarUrl || undefined}
+        onClick={(e) => {
+          if (onInfoClick) { e.stopPropagation(); onInfoClick(room); }
+        }}
         sx={{
           bgcolor: active ? "#3C4F4A" : "#7b68ee",
           width: 46,
@@ -46,6 +49,7 @@ function GroupItem({ room, active, unread = 0, onClick }) {
           fontSize: "0.8rem",
           fontWeight: 700,
           flexShrink: 0,
+          cursor: onInfoClick ? "pointer" : "default",
         }}
       >
         {avatar}
