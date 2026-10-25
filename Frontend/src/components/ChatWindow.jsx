@@ -9,14 +9,12 @@ import {
   CircularProgress,
   IconButton,
   TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import arrowIcon from "@/assets/arrow.svg";
 import {
   AttachFile,
   Circle,
-  People,
   Send,
 } from "@mui/icons-material";
 import MessageBubble from "./MessageBubble";
@@ -186,16 +184,7 @@ function ChatWindow({
           </Typography>
         </Box>
 
-        {/* Action icons */}
-        <Box sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-          {activeContact.isGroup && (
-            <Tooltip title="View members">
-              <IconButton size="small" sx={{ color: "text.secondary" }} onClick={onViewMembers}>
-                <People fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-        </Box>
+
       </Box>
 
       <Box
