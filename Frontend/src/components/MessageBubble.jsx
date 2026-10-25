@@ -1,14 +1,45 @@
 import React, { useEffect, useState } from 'react'
 import { useSelector } from 'react-redux'
 import { Box, Typography, Button } from '@mui/material'
-import { Check, DoneAll, AccessTime } from '@mui/icons-material'
+import { Check, AccessTime } from '@mui/icons-material'
 
 function Ticks({ status }) {
   if (!status) return null
-  if (status === 'sending') return <AccessTime sx={{ fontSize: 13, ml: 0.5, opacity: 0.7 }} />
-  if (status === 'sent') return <Check sx={{ fontSize: 14, ml: 0.5, opacity: 0.8 }} />
-  if (status === 'delivered') return <DoneAll sx={{ fontSize: 14, ml: 0.5, opacity: 0.8 }} />
-  if (status === 'read') return <DoneAll sx={{ fontSize: 14, ml: 0.5, color: '#4fc3f7' }} />
+
+  // Sending — clock icon
+  if (status === 'sending') {
+    return <AccessTime sx={{ fontSize: 13, ml: 0.5, color: 'rgba(255,255,255,0.6)' }} />
+  }
+
+  // Sent — single grey tick
+  if (status === 'sent') {
+    return (
+      <Box sx={{ display: 'inline-flex', ml: 0.5 }}>
+        <Check sx={{ fontSize: 14, color: 'rgba(255,255,255,0.7)' }} />
+      </Box>
+    )
+  }
+
+  // Delivered — double grey tick (two overlapping checks)
+  if (status === 'delivered') {
+    return (
+      <Box sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5, position: 'relative', width: 18, height: 14 }}>
+        <Check sx={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', position: 'absolute', left: 0 }} />
+        <Check sx={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', position: 'absolute', left: 4 }} />
+      </Box>
+    )
+  }
+
+  // Read — double blue tick
+  if (status === 'read') {
+    return (
+      <Box sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5, position: 'relative', width: 18, height: 14 }}>
+        <Check sx={{ fontSize: 14, color: '#4fc3f7', position: 'absolute', left: 0 }} />
+        <Check sx={{ fontSize: 14, color: '#4fc3f7', position: 'absolute', left: 4 }} />
+      </Box>
+    )
+  }
+
   return null
 }
 

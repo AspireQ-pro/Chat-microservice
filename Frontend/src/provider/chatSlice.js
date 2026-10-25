@@ -432,11 +432,26 @@ const chatSlice = createSlice({
       }
     },
     messageSaved(state, { payload }) {
-      const { clientId, roomId } = payload;
+      const { clientId, roomId, message } = payload;
       if (!clientId) return;
       const list = roomId ? state.messages[roomId] : null;
       const target = list?.find((m) => m.clientId === clientId);
-      if (target) target.status = target.status === "read" ? "read" : "sent";
+      if (target) {
+        // Use the server-confirmed status from the ack message if available,
+        // so delivered/read are reflected immediately rather than staying "sent"
+        if (message) {
+          const readBy = Array.isArray(message.readBy) ? message.readBy : [];
+          const recipientCount = Number.isFinite(message.recipientCount)
+            ? message.recipientCount
+            : target.recipientCount ?? 1;
+          const isRead = recipientCount > 0 && readBy.length >= recipientCount;
+          target.status = isRead ? "read" : message.deliveredAt ? "delivered" : "sent";
+          target.readBy = readBy;
+          target.recipientCount = recipientCount;
+        } else {
+          target.status = target.status === "read" ? "read" : "sent";
+        }
+      }
       state.outbox = state.outbox.filter((o) => o.clientId !== clientId);
       persistOutbox(state.outbox);
     },
