@@ -28,6 +28,7 @@ model ChatUser {
   email          String?
   role           String?
   avatarUrl      String?
+  avatarStorageKey String?
   lastSeenAt     DateTime?
   createdAt      DateTime @default(now())
 
@@ -49,6 +50,7 @@ model ChatRoom {
   lastMessageAt     DateTime?
   lastMessagePreview String?
   avatarUrl         String?
+  avatarStorageKey  String?
   description       String?
   createdAt         DateTime @default(now())
 
@@ -77,6 +79,7 @@ model Message {
   messageType String   @default("text")
   fileUrl     String?
   fileType    String?
+  fileStorageKey String?
   isRead      Boolean  @default(false)
   readAt      DateTime?
   deliveredAt DateTime?

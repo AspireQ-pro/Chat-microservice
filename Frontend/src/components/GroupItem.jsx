@@ -1,5 +1,6 @@
 import React from "react";
-import { Box, Typography, Avatar } from "@mui/material";
+import { Box, Typography } from "@mui/material";
+import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
 
 function formatTime(dateStr) {
   if (!dateStr) return "";
@@ -36,8 +37,8 @@ function GroupItem({ room, active, unread = 0, onClick, onInfoClick }) {
       }}
       onClick={onClick}
     >
-      {/* Avatar — clicking opens group info */}
-      <Avatar
+      {/* Avatar */}
+      <AuthenticatedAvatar
         src={room.avatarUrl || undefined}
         onClick={(e) => {
           if (onInfoClick) { e.stopPropagation(); onInfoClick(room); }
@@ -53,7 +54,7 @@ function GroupItem({ room, active, unread = 0, onClick, onInfoClick }) {
         }}
       >
         {avatar}
-      </Avatar>
+      </AuthenticatedAvatar>
 
       {/* Text block */}
       <Box sx={{ flex: 1, minWidth: 0 }}>

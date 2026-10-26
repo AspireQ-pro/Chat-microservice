@@ -1,15 +1,16 @@
 ﻿require("dotenv").config();
 const express = require("express");
 const http = require("http");
-const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
-const multer = require("multer");
 const { Server } = require("socket.io");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const { parseMediaUpload } = require("./src/media/uploadMiddleware");
+const mediaStorage = require("./src/media/storage");
+const { mediaKey, legacyMediaKey } = require("./src/media/keys");
 
 const app = express();
 const server = http.createServer(app);
@@ -56,9 +57,6 @@ const CHAT_FRONTEND_URL = (
   process.env.CHAT_FRONTEND_URL ||
   (!isProduction ? `http://localhost:${process.env.CHAT_FRONTEND_PORT || 3001}` : "")
 ).replace(/\/$/, "");
-const UPLOAD_DIR = path.join(__dirname, "uploads");
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
 const UPLOAD_TYPES = {
   "image/jpeg": { extension: ".jpg", fileType: "image" },
   "image/png": { extension: ".png", fileType: "image" },
@@ -67,31 +65,101 @@ const UPLOAD_TYPES = {
   "application/pdf": { extension: ".pdf", fileType: "file" },
 };
 
-const uploadFile = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, callback) => callback(null, UPLOAD_DIR),
-    filename: (_req, file, callback) => {
-      const type = UPLOAD_TYPES[file.mimetype];
-      callback(null, `${crypto.randomUUID()}${type?.extension || ""}`);
-    },
-  }),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
-  fileFilter: (_req, file, callback) => {
-    if (!UPLOAD_TYPES[file.mimetype]) {
-      return callback(new Error("Only JPEG, PNG, GIF, WebP, and PDF files are allowed"));
-    }
-    callback(null, true);
-  },
-});
+const parseRoomUpload = parseMediaUpload;
 
-function parseRoomUpload(req, res, next) {
-  uploadFile.single("file")(req, res, (err) => {
-    if (err) {
-      const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
-      return sendError(res, status, err.message || "Upload failed");
-    }
-    next();
+async function sendStoredMedia(res, key) {
+  const target = await mediaStorage.getDownloadTarget(key);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (target.url) return res.redirect(302, target.url);
+  res.setHeader("Content-Disposition", "inline");
+  return res.sendFile(target.path, (err) => {
+    if (err && !res.headersSent) res.status(err.statusCode || 404).end();
   });
+}
+
+function mediaUploadInput(req, imagesOnly = false) {
+  const contentType = String(req.body?.contentType || "");
+  const type = UPLOAD_TYPES[contentType];
+  const size = Number(req.body?.size);
+  if (!type || (imagesOnly && type.fileType !== "image")) return null;
+  if (!Number.isInteger(size) || size < 1 || size > 10 * 1024 * 1024) return null;
+  return { contentType, type, size };
+}
+
+async function startPresignedMediaUpload(req, { purpose, category, ownerId, roomId, imagesOnly = false }) {
+  const input = mediaUploadInput(req, imagesOnly);
+  if (!input) return { error: "Unsupported file type or size" };
+  if (!mediaStorage.isS3Enabled) return { mode: "proxy" };
+
+  const filename = `${crypto.randomUUID()}${input.type.extension}`;
+  const finalKey = mediaKey(req.projectId, category, ownerId, filename);
+  const stagingKey = `pending/${req.projectId}/${crypto.randomUUID()}`;
+  const form = await mediaStorage.createUploadForm({
+    key: stagingKey,
+    contentType: input.contentType,
+    maxSize: 10 * 1024 * 1024,
+  });
+  const completionToken = jwt.sign({
+    scope: "media-upload",
+    purpose,
+    projectId: req.projectId,
+    userId: req.userId,
+    roomId: roomId || null,
+    stagingKey,
+    finalKey,
+    filename,
+    contentType: input.contentType,
+    fileType: input.type.fileType,
+  }, CHAT_JWT_SECRET, { expiresIn: "10m" });
+
+  return {
+    mode: "s3",
+    url: form.url,
+    fields: form.fields,
+    completionToken,
+  };
+}
+
+function verifyUploadToken(req, purpose, roomId) {
+  const token = req.body?.completionToken;
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, CHAT_JWT_SECRET);
+    if (
+      payload.scope !== "media-upload" || payload.purpose !== purpose ||
+      payload.projectId !== req.projectId || payload.userId !== req.userId ||
+      (roomId && payload.roomId !== roomId)
+    ) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+async function completePresignedMediaUpload(req, payload) {
+  return mediaStorage.finalizeUpload({
+    stagingKey: payload.stagingKey,
+    finalKey: payload.finalKey,
+    contentType: payload.contentType,
+    maxSize: 10 * 1024 * 1024,
+    verifySignature: hasAllowedFileSignature,
+  });
+}
+
+function requireRoomUploadAccess(req, res, next) {
+  (async () => {
+    const room = await prisma.chatRoom.findFirst({
+      where: { id: req.params.roomId, projectId: req.projectId },
+      include: { members: { where: { userId: req.userId }, select: { userId: true } } },
+    });
+    if (!room || room.members.length === 0) return sendError(res, 403, "Not a member of this room");
+    const { allowDirectChat, allowGroupChat } = await getProjectPermissions(req.projectId, req);
+    if ((room.isGroup && !allowGroupChat) || (!room.isGroup && !allowDirectChat)) {
+      return sendError(res, 403, "Chat is not enabled for this project");
+    }
+    req.mediaRoom = room;
+    next();
+  })().catch(next);
 }
 
 function hasAllowedFileSignature(buffer, mimeType) {
@@ -217,7 +285,8 @@ function decryptContent(stored) {
 // Decrypt a message object's content field in place (returns a shallow copy).
 function decryptMessage(msg) {
   if (!msg) return msg;
-  return { ...msg, content: decryptContent(msg.content) };
+  const { fileStorageKey: _fileStorageKey, ...publicMessage } = msg;
+  return { ...publicMessage, content: decryptContent(msg.content) };
 }
 
 async function serializeRoomForUser(room, userId) {
@@ -242,12 +311,33 @@ async function serializeRoomForUser(room, userId) {
     createdById = sorted[0]?.userId || null;
   }
 
+  const { avatarStorageKey: _avatarStorageKey, ...publicRoom } = room;
+  const members = room.members?.map((member) => {
+    if (!member.user) return member;
+    const { avatarStorageKey: _userAvatarStorageKey, ...publicUser } = member.user;
+    return { ...member, user: publicUser };
+  });
+
   return {
-    ...room,
+    ...publicRoom,
+    ...(members ? { members } : {}),
     lastMessagePreview: decryptContent(room.lastMessagePreview),
     unreadCount,
     createdById,
   };
+}
+
+function roomMediaStorageKey(projectId, room, fileUrl) {
+  try {
+    const url = new URL(String(fileUrl));
+    const prefix = `${API_BASE}/rooms/${room.id}/uploads/`;
+    if (url.origin !== new URL(BACKEND_URL).origin || !url.pathname.startsWith(prefix) || url.search || url.hash) return null;
+    const filename = path.basename(url.pathname);
+    if (!/^[0-9a-f-]{36}\.(jpg|png|gif|webp|pdf)$/i.test(filename)) return null;
+    return mediaKey(projectId, room.isGroup ? "groups" : "direct", room.id, filename);
+  } catch {
+    return null;
+  }
 }
 
 // â”€â”€â”€ Middleware: Resolve project from X-API-KEY or societyId â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -806,7 +896,7 @@ app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
       where,
       orderBy: { name: "asc" },
     });
-    res.json(users);
+    res.json(users.map(({ avatarStorageKey: _storageKey, ...user }) => user));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1111,6 +1201,36 @@ app.post(
 // POST /api/rooms/group/avatar
 // Authenticated; returns { avatarUrl } which callers pass into POST /rooms/group.
 app.post(
+  `${API_BASE}/rooms/group/avatar/presign`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res) => {
+    const { allowGroupChat } = await getProjectPermissions(req.projectId, req);
+    if (!allowGroupChat) return sendError(res, 403, "Group chat is not enabled for this project");
+    const result = await startPresignedMediaUpload(req, {
+      purpose: "group-avatar",
+      category: "groups/avatars",
+      ownerId: "shared",
+      imagesOnly: true,
+    });
+    if (result.error) return sendError(res, 400, result.error);
+    res.json(result);
+  }),
+);
+
+app.post(
+  `${API_BASE}/rooms/group/avatar/complete`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res) => {
+    const { allowGroupChat } = await getProjectPermissions(req.projectId, req);
+    if (!allowGroupChat) return sendError(res, 403, "Group chat is not enabled for this project");
+    const payload = verifyUploadToken(req, "group-avatar");
+    if (!payload) return sendError(res, 403, "Invalid or expired upload authorization");
+    await completePresignedMediaUpload(req, payload);
+    res.status(201).json({ avatarUrl: `${BACKEND_URL}${API_BASE}/uploads/${payload.filename}` });
+  }),
+);
+
+app.post(
   `${API_BASE}/rooms/group/avatar`,
   authenticateChatJWT,
   asyncHandler(async (req, res, next) => {
@@ -1127,20 +1247,92 @@ app.post(
     // Only images are accepted as group avatars (not PDFs).
     const allowedType = UPLOAD_TYPES[req.file.mimetype];
     if (!allowedType || allowedType.fileType !== "image") {
-      await fs.promises.unlink(path.join(UPLOAD_DIR, req.file.filename)).catch(() => {});
       return sendError(res, 400, "Only image files (JPEG, PNG, GIF, WebP) are accepted for group avatars");
     }
 
     // Verify magic bytes to prevent MIME spoofing.
-    const filePath = path.join(UPLOAD_DIR, req.file.filename);
-    const signature = await fs.promises.readFile(filePath);
-    if (!hasAllowedFileSignature(signature, req.file.mimetype)) {
-      await fs.promises.unlink(filePath).catch(() => {});
+    if (!hasAllowedFileSignature(req.file.buffer, req.file.mimetype)) {
       return sendError(res, 400, "File contents do not match an allowed image type");
     }
 
-    const avatarUrl = `${BACKEND_URL}${API_BASE}/uploads/${req.file.filename}`;
+    const filename = `${crypto.randomUUID()}${allowedType.extension}`;
+    const key = mediaKey(req.projectId, "groups/avatars", "shared", filename);
+    await mediaStorage.putObject({ key, body: req.file.buffer, contentType: req.file.mimetype });
+    const avatarUrl = `${BACKEND_URL}${API_BASE}/uploads/${filename}`;
     res.status(201).json({ avatarUrl });
+  }),
+);
+
+// Upload or replace the authenticated user's profile image.
+app.post(
+  `${API_BASE}/users/me/avatar/presign`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res) => {
+    const result = await startPresignedMediaUpload(req, {
+      purpose: "profile-avatar",
+      category: "users/profile",
+      ownerId: req.userId,
+      imagesOnly: true,
+    });
+    if (result.error) return sendError(res, 400, result.error);
+    res.json(result);
+  }),
+);
+
+app.post(
+  `${API_BASE}/users/me/avatar/complete`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res) => {
+    const payload = verifyUploadToken(req, "profile-avatar");
+    if (!payload) return sendError(res, 403, "Invalid or expired upload authorization");
+    await completePresignedMediaUpload(req, payload);
+    const avatarUrl = `${BACKEND_URL}${API_BASE}/users/${req.userId}/avatar/${payload.filename}`;
+    await prisma.chatUser.update({
+      where: { id: req.userId },
+      data: { avatarUrl, avatarStorageKey: payload.finalKey },
+    });
+    res.status(201).json({ avatarUrl });
+  }),
+);
+
+app.post(
+  `${API_BASE}/users/me/avatar`,
+  authenticateChatJWT,
+  parseRoomUpload,
+  asyncHandler(async (req, res) => {
+    if (!req.file) return sendError(res, 400, "A file is required");
+    const allowedType = UPLOAD_TYPES[req.file.mimetype];
+    if (!allowedType || allowedType.fileType !== "image" || !hasAllowedFileSignature(req.file.buffer, req.file.mimetype)) {
+      return sendError(res, 400, "File contents do not match an allowed image type");
+    }
+    const filename = `${crypto.randomUUID()}${allowedType.extension}`;
+    const key = mediaKey(req.projectId, "users/profile", req.userId, filename);
+    await mediaStorage.putObject({ key, body: req.file.buffer, contentType: req.file.mimetype });
+    const avatarUrl = `${BACKEND_URL}${API_BASE}/users/${req.userId}/avatar/${filename}`;
+    await prisma.chatUser.update({
+      where: { id: req.userId },
+      data: { avatarUrl, avatarStorageKey: key },
+    });
+    res.status(201).json({ avatarUrl });
+  }),
+);
+
+// Profile images are private and only available to users in the same society.
+app.get(
+  `${API_BASE}/users/:userId/avatar/:filename`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res) => {
+    const { userId, filename } = req.params;
+    if (path.basename(filename) !== filename || !/^[0-9a-f-]{36}\.(jpg|png|gif|webp)$/i.test(filename)) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    const user = await prisma.chatUser.findFirst({
+      where: { id: userId, projectId: req.projectId, avatarUrl: `${BACKEND_URL}${API_BASE}/users/${userId}/avatar/${filename}` },
+      select: { id: true, avatarStorageKey: true },
+    });
+    if (!user) return res.status(404).json({ error: "Not found" });
+    const key = user.avatarStorageKey || legacyMediaKey(req.projectId, "users/profile", userId, filename);
+    await sendStoredMedia(res, key);
   }),
 );
 
@@ -1174,6 +1366,12 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
       return null;
     }
   })();
+  const safeAvatarStorageKey = safeAvatarUrl
+    ? mediaKey(req.projectId, "groups/avatars", "shared", path.basename(new URL(safeAvatarUrl).pathname))
+    : null;
+  if (safeAvatarStorageKey && !(await mediaStorage.objectExists(safeAvatarStorageKey))) {
+    return sendError(res, 400, "Group avatar upload was not found");
+  }
 
   const safeDescription = description && String(description).trim()
     ? String(description).trim().slice(0, 500)
@@ -1196,6 +1394,7 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
         name,
         isGroup: true,
         avatarUrl: safeAvatarUrl,
+        avatarStorageKey: safeAvatarStorageKey,
         description: safeDescription,
         members: { create: allIds.map((userId) => ({ userId })) },
       },
@@ -1417,6 +1616,38 @@ app.delete(`${API_BASE}/rooms/:roomId/members/:targetUserId`, authenticateChatJW
 }));
 
 app.post(
+  `${API_BASE}/rooms/:roomId/upload-url`,
+  authenticateChatJWT,
+  requireRoomUploadAccess,
+  asyncHandler(async (req, res) => {
+    const result = await startPresignedMediaUpload(req, {
+      purpose: "room-attachment",
+      category: req.mediaRoom.isGroup ? "groups" : "direct",
+      ownerId: req.mediaRoom.id,
+      roomId: req.mediaRoom.id,
+    });
+    if (result.error) return sendError(res, 400, result.error);
+    res.json(result);
+  }),
+);
+
+app.post(
+  `${API_BASE}/rooms/:roomId/upload-complete`,
+  authenticateChatJWT,
+  requireRoomUploadAccess,
+  asyncHandler(async (req, res) => {
+    const payload = verifyUploadToken(req, "room-attachment", req.mediaRoom.id);
+    if (!payload) return sendError(res, 403, "Invalid or expired upload authorization");
+    const saved = await completePresignedMediaUpload(req, payload);
+    res.status(201).json({
+      fileUrl: `${BACKEND_URL}${API_BASE}/rooms/${req.mediaRoom.id}/uploads/${payload.filename}`,
+      fileType: payload.fileType,
+      size: saved.size,
+    });
+  }),
+);
+
+app.post(
   `${API_BASE}/rooms/:roomId/upload`,
   authenticateChatJWT,
   asyncHandler(async (req, res, next) => {
@@ -1434,20 +1665,22 @@ app.post(
     if (!room.isGroup && !allowDirectChat) {
       return sendError(res, 403, "Direct messaging is not enabled for this project");
     }
+    req.room = room;
     next();
   }),
   parseRoomUpload,
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "A file is required" });
-    const filePath = path.join(UPLOAD_DIR, req.file.filename);
-    const signature = await fs.promises.readFile(filePath);
     const allowedType = UPLOAD_TYPES[req.file.mimetype];
-    if (!allowedType || !hasAllowedFileSignature(signature, req.file.mimetype)) {
-      await fs.promises.unlink(filePath).catch(() => {});
+    if (!allowedType || !hasAllowedFileSignature(req.file.buffer, req.file.mimetype)) {
       return res.status(400).json({ error: "File contents do not match an allowed type" });
     }
+    const filename = `${crypto.randomUUID()}${allowedType.extension}`;
+    const category = req.room.isGroup ? "groups" : "direct";
+    const key = mediaKey(req.projectId, category, req.room.id, filename);
+    await mediaStorage.putObject({ key, body: req.file.buffer, contentType: req.file.mimetype });
     res.status(201).json({
-      fileUrl: `${BACKEND_URL}${API_BASE}/rooms/${req.params.roomId}/uploads/${req.file.filename}`,
+      fileUrl: `${BACKEND_URL}${API_BASE}/rooms/${req.params.roomId}/uploads/${filename}`,
       fileType: allowedType.fileType,
       size: req.file.size,
     });
@@ -1472,7 +1705,7 @@ app.get(
         projectId: req.projectId,
         members: { some: { userId: req.userId } },
       },
-      select: { id: true },
+      select: { id: true, isGroup: true },
     });
     if (!room) return res.status(404).json({ error: "Attachment not found" });
 
@@ -1481,16 +1714,13 @@ app.get(
         roomId,
         fileUrl: { endsWith: `/uploads/${filename}` },
       },
-      select: { id: true },
+      select: { id: true, fileStorageKey: true },
     });
     if (!referenced) return res.status(404).json({ error: "Attachment not found" });
 
-    const filePath = path.join(UPLOAD_DIR, filename);
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Disposition", "inline");
-    res.sendFile(filePath, (err) => {
-      if (err && !res.headersSent) res.status(err.statusCode || 404).end();
-    });
+    const category = room.isGroup ? "groups" : "direct";
+    const key = referenced.fileStorageKey || legacyMediaKey(req.projectId, category, roomId, filename);
+    await sendStoredMedia(res, key);
   }),
 );
 
@@ -1516,16 +1746,12 @@ app.get(
         projectId: req.projectId,
         avatarUrl: { endsWith: `/uploads/${filename}` },
       },
-      select: { id: true },
+      select: { id: true, avatarStorageKey: true },
     });
     if (!room) return res.status(404).json({ error: "Not found" });
 
-    const filePath = path.join(UPLOAD_DIR, filename);
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Disposition", "inline");
-    res.sendFile(filePath, (err) => {
-      if (err && !res.headersSent) res.status(err.statusCode || 404).end();
-    });
+    const key = room.avatarStorageKey || legacyMediaKey(req.projectId, "groups/avatars", "shared", filename);
+    await sendStoredMedia(res, key);
   }),
 );
 
@@ -1979,6 +2205,24 @@ io.on("connection", (socket) => {
           return socket.emit("error", { message: "Not a member of this room" });
         }
 
+        const fileStorageKey = fileUrl ? roomMediaStorageKey(socket.projectId, room, fileUrl) : null;
+        if (fileUrl && !fileStorageKey) {
+          socket.emit("message_ack", {
+            clientId: clientId || null,
+            status: "failed",
+            error: "Attachment URL is invalid for this room",
+          });
+          return socket.emit("error", { message: "Attachment URL is invalid for this room" });
+        }
+        if (fileStorageKey && !(await mediaStorage.objectExists(fileStorageKey))) {
+          socket.emit("message_ack", {
+            clientId: clientId || null,
+            status: "failed",
+            error: "Attachment upload was not completed",
+          });
+          return socket.emit("error", { message: "Attachment upload was not completed" });
+        }
+
         if (!room.isGroup && room.directStatus === "pending") {
           if (room.requestedById !== senderId) {
             return socket.emit("error", {
@@ -2041,6 +2285,7 @@ io.on("connection", (socket) => {
             content: encryptContent(content), // encrypted at rest
             fileUrl,
             fileType,
+            fileStorageKey,
             messageType,
             deliveredAt: someRecipientOnline ? new Date() : null,
           },

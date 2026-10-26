@@ -131,6 +131,8 @@ window.addEventListener("message", (event) => {
 | `CORS_ORIGIN`                 | Comma-separated Chat and Society HTTPS origins            | `https://chat.example.com,https://society.example.com`            |
 | `PORT`                        | Backend server port                                       | `5000`                                                            |
 | `BACKEND_URL`                 | Public backend URL used for upload links                  | `http://localhost:5000`                                           |
+| `AWS_REGION`                  | AWS region containing the private media bucket            | `ap-south-1`                                                      |
+| `S3_BUCKET`                   | Private S3 bucket for chat media; unset uses local uploads | unset                                                            |
 
 Production startup fails if secrets, HTTPS URLs, or explicit CORS origins are missing. Do not use placeholder values. Copy the root `.env.example` to `.env`, fill it locally, and keep `.env` out of source control.
 
@@ -418,6 +420,43 @@ Content-Type: multipart/form-data
 ```
 
 Form field: `file`. Images render in the conversation; PDFs open in a new tab.
+
+### Media Storage (S3)
+
+Set `S3_BUCKET` (or `AWS_S3_BUCKET`) and `AWS_REGION` on the backend to enable direct S3 uploads. The value must be the bucket name, for example `aspireq-chat-service`; the bucket URL is not required. The client asks the API for a short-lived presigned POST, uploads straight to S3, and calls a completion endpoint. The backend checks the upload's size, content type, and file signature, then moves it from `pending/` to its final key. Downloads are authorized by the API, which redirects to a short-lived presigned GET URL. Existing local uploads remain readable as a fallback during migration; when no bucket is configured, the client uses the local backend upload path.
+
+Configure S3 CORS to allow the Chat frontend origins for `POST`, `GET`, and `HEAD`, and allow the `Content-Type` header. Keep public bucket access blocked and enable bucket default encryption. The backend role needs `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the media prefixes; the copy from `pending/` uses source read and destination write permissions. Add a lifecycle rule to expire objects under `pending/` after one day.
+
+Example bucket CORS configuration (replace the origins with the deployed Chat URL):
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://chat.example.com", "http://localhost:3001", "http://localhost:5173"],
+    "AllowedMethods": ["POST", "GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+New object keys use the chat project's ID as its society identifier and generated UUID file names:
+
+```text
+societies/<projectId>/media/profiles/<userId>/<fileId>.<ext>
+societies/<projectId>/media/group-avatars/shared/<fileId>.<ext>
+societies/<projectId>/media/chats/direct/<roomId>/attachments/<fileId>.<ext>
+societies/<projectId>/media/chats/groups/<roomId>/attachments/<fileId>.<ext>
+```
+
+The group-avatar path is shared within a society because the avatar is uploaded before its room is created. Message media uses the room ID, including one-to-one conversations, so authorization and cleanup remain scoped to a room. Existing objects remain at their old keys and are read using the stored database key or a legacy-key fallback; no bulk S3 move is required.
+
+The backend stores the final S3 key in `ChatUser.avatarStorageKey`, `ChatRoom.avatarStorageKey`, or `Message.fileStorageKey`, as appropriate. Keys stay server-side and are not sent to the frontend. The migration adds these nullable fields, so older media continues to resolve using the existing URL while new uploads save their key.
+
+Upload a profile image with `POST /api/users/me/avatar` using the multipart `file` field and Chat JWT. It returns `{ "avatarUrl": "..." }`; the client can use that URL as the user's `avatarUrl`. Group avatars use `POST /api/rooms/group/avatar`, and direct/group attachments use `POST /api/rooms/:roomId/upload`.
+
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` can be used for local development; prefer an IAM role in deployed environments.
 
 ## Socket.IO Events
 

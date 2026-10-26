@@ -18,6 +18,7 @@ import {
   Send,
 } from "@mui/icons-material";
 import MessageBubble from "./MessageBubble";
+import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
 
 function ChatWindow({
   isMobile,
@@ -155,7 +156,7 @@ function ChatWindow({
             ) : null
           }
         >
-          <Avatar
+          <AuthenticatedAvatar
             src={activeContact.avatarUrl || undefined}
             onClick={activeContact.isGroup ? onViewMembers : undefined}
             sx={{
@@ -168,7 +169,7 @@ function ChatWindow({
             }}
           >
             {activeContact.avatar}
-          </Avatar>
+          </AuthenticatedAvatar>
         </Badge>
 
         {/* Name + status */}

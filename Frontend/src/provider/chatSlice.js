@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
+import { uploadWithPresignedForm } from "../features/media/upload";
 
 const API =
   import.meta.env.VITE_API_URL ||
@@ -183,6 +184,13 @@ export const uploadGroupAvatar = createAsyncThunk(
   async ({ file }, { getState, rejectWithValue }) => {
     try {
       if (!file) return rejectWithValue("File is required");
+      const presigned = await uploadWithPresignedForm({
+        presignUrl: `${API_BASE}/rooms/group/avatar/presign`,
+        completeUrl: `${API_BASE}/rooms/group/avatar/complete`,
+        file,
+        getState,
+      });
+      if (presigned.mode !== "proxy") return presigned;
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch(`${API_BASE}/rooms/group/avatar`, {
@@ -192,6 +200,34 @@ export const uploadGroupAvatar = createAsyncThunk(
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to upload group avatar");
+      return data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const uploadProfileAvatar = createAsyncThunk(
+  "chat/uploadProfileAvatar",
+  async ({ file }, { getState, rejectWithValue }) => {
+    try {
+      if (!file) return rejectWithValue("File is required");
+      const presigned = await uploadWithPresignedForm({
+        presignUrl: `${API_BASE}/users/me/avatar/presign`,
+        completeUrl: `${API_BASE}/users/me/avatar/complete`,
+        file,
+        getState,
+      });
+      if (presigned.mode !== "proxy") return presigned;
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_BASE}/users/me/avatar`, {
+        method: "POST",
+        headers: authHeaders(getState),
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to upload profile image");
       return data;
     } catch (err) {
       return rejectWithValue(err.message);
@@ -226,6 +262,13 @@ export const uploadChatFile = createAsyncThunk(
   "chat/uploadChatFile",
   async ({ roomId, file }, { getState, rejectWithValue }) => {
     try {
+      const presigned = await uploadWithPresignedForm({
+        presignUrl: `${API_BASE}/rooms/${roomId}/upload-url`,
+        completeUrl: `${API_BASE}/rooms/${roomId}/upload-complete`,
+        file,
+        getState,
+      });
+      if (presigned.mode !== "proxy") return { roomId, ...presigned };
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch(`${API_BASE}/rooms/${roomId}/upload`, {
