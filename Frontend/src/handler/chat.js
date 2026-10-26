@@ -279,7 +279,7 @@ export function useChatHandler() {
       if (!p) return;
       if (p.status === "saved")
         dispatch(
-          messageSaved({ clientId: p.clientId, roomId: p.message?.roomId }),
+          messageSaved({ clientId: p.clientId, roomId: p.message?.roomId, message: p.message }),
         );
       else if (p.status === "failed")
         dispatch(messageFailed({ clientId: p.clientId }));
