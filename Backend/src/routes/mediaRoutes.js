@@ -107,7 +107,10 @@ app.get(
     const referenced = await prisma.message.findFirst({
       where: {
         roomId,
-        fileUrl: { endsWith: `/uploads/${filename}` },
+        OR: [
+          { fileStorageKey: { endsWith: `/${filename}` } },
+          { fileUrl: { endsWith: `/uploads/${filename}` } },
+        ],
       },
       select: { id: true, fileStorageKey: true },
     });
@@ -141,7 +144,10 @@ app.get(
         projectId: req.projectId,
         isGroup: true,
         members: { some: { userId: req.userId } },
-        avatarUrl: { endsWith: `/uploads/${filename}` },
+        OR: [
+          { avatarStorageKey: { endsWith: `/${filename}` } },
+          { avatarUrl: { endsWith: `/uploads/${filename}` } },
+        ],
       },
       select: { id: true, avatarStorageKey: true },
     });

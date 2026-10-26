@@ -207,7 +207,7 @@ io.on("connection", (socket) => {
           });
           if (existingRequestMessage) {
             const outgoing = {
-              ...decryptMessage(existingRequestMessage),
+              ...await decryptMessage(existingRequestMessage),
               clientId: clientId || null,
             };
             return socket.emit("message_ack", {
@@ -253,7 +253,7 @@ io.on("connection", (socket) => {
             roomId,
             senderId,
             content: encryptContent(content), // encrypted at rest
-            fileUrl,
+            fileUrl: fileStorageKey ? null : fileUrl,
             fileType,
             fileStorageKey,
             messageType,
@@ -277,7 +277,7 @@ io.on("connection", (socket) => {
         // Emit the DECRYPTED message (plus the clientId so the sender can
         // reconcile their optimistic bubble) once to the room channel.
         const outgoing = {
-          ...decryptMessage(created),
+          ...await decryptMessage(created),
           clientId: clientId || null,
           readBy: [],
           recipientCount: members.filter((member) => member.userId !== senderId).length,

@@ -164,7 +164,7 @@ app.post(
       });
 
       const outgoing = {
-        ...decryptMessage(saved.message),
+        ...await decryptMessage(saved.message),
         clientId,
         readBy: [],
         recipientCount: saved.room.members.filter(

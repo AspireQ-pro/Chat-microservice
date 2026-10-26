@@ -66,7 +66,7 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
         projectId: req.projectId,
         name,
         isGroup: true,
-        avatarUrl: safeAvatarUrl,
+        avatarUrl: null,
         avatarStorageKey: safeAvatarStorageKey,
         description: safeDescription,
         members: { create: allIds.map((userId) => ({ userId })) },
@@ -194,7 +194,7 @@ app.patch(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (
         if (!(await mediaStorage.objectExists(storageKey))) {
           return sendError(res, 400, 'Group avatar upload was not found');
         }
-        updateData.avatarUrl = avatarUrl;
+        updateData.avatarUrl = null;
         updateData.avatarStorageKey = storageKey;
       } catch {
         return sendError(res, 400, 'Invalid avatar URL');

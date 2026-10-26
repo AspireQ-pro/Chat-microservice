@@ -96,11 +96,12 @@ app.post(
     const payload = verifyUploadToken(req, "profile-avatar");
     if (!payload) return sendError(res, 403, "Invalid or expired upload authorization");
     await completePresignedMediaUpload(req, payload);
-    const avatarUrl = `${BACKEND_URL}${API_BASE}/users/${req.userId}/avatar/${payload.filename}`;
     await prisma.chatUser.update({
       where: { id: req.userId },
-      data: { avatarUrl, avatarStorageKey: payload.finalKey },
+      data: { avatarUrl: null, avatarStorageKey: payload.finalKey },
     });
+    const avatarUrl = await mediaStorage.createDownloadUrl(payload.finalKey) ||
+      `${BACKEND_URL}${API_BASE}/users/${req.userId}/avatar/${payload.filename}`;
     res.status(201).json({ avatarUrl });
   }),
 );
@@ -121,7 +122,7 @@ app.post(
     const avatarUrl = `${BACKEND_URL}${API_BASE}/users/${req.userId}/avatar/${filename}`;
     await prisma.chatUser.update({
       where: { id: req.userId },
-      data: { avatarUrl, avatarStorageKey: key },
+      data: { avatarUrl: null, avatarStorageKey: key },
     });
     res.status(201).json({ avatarUrl });
   }),
@@ -137,7 +138,14 @@ app.get(
       return res.status(404).json({ error: "Not found" });
     }
     const user = await prisma.chatUser.findFirst({
-      where: { id: userId, projectId: req.projectId, avatarUrl: `${BACKEND_URL}${API_BASE}/users/${userId}/avatar/${filename}` },
+      where: {
+        id: userId,
+        projectId: req.projectId,
+        OR: [
+          { avatarStorageKey: { endsWith: `/${filename}` } },
+          { avatarUrl: { endsWith: `/users/${userId}/avatar/${filename}` } },
+        ],
+      },
       select: { id: true, avatarStorageKey: true },
     });
     if (!user) return res.status(404).json({ error: "Not found" });

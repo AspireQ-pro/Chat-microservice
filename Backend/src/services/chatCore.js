@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const path = require("path");
 
-module.exports = function createChatCore({ prisma, config, mediaKey }) {
+module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorage }) {
   const { isProduction, CHAT_JWT_SECRET, API_BASE, BACKEND_URL } = config;
   const ENC_PREFIX = "enc:v1:";
   const MESSAGE_ENC_KEY = crypto
@@ -64,10 +64,45 @@ module.exports = function createChatCore({ prisma, config, mediaKey }) {
     }
   }
 
-  function decryptMessage(msg) {
+  async function decryptMessage(msg) {
     if (!msg) return msg;
     const { fileStorageKey: _fileStorageKey, ...publicMessage } = msg;
-    return { ...publicMessage, content: decryptContent(msg.content) };
+    return {
+      ...publicMessage,
+      fileUrl: msg.fileStorageKey
+        ? await attachmentUrl(msg.roomId, msg.fileStorageKey)
+        : normalizeLegacyMediaUrl(msg.fileUrl),
+      content: decryptContent(msg.content),
+    };
+  }
+
+  function normalizeLegacyMediaUrl(value) {
+    if (!value) return value;
+    try {
+      const url = new URL(String(value), BACKEND_URL);
+      if (url.pathname.startsWith(`${API_BASE}/`)) return `${BACKEND_URL}${url.pathname}`;
+    } catch {
+      // Preserve legacy non-HTTP media references.
+    }
+    return value;
+  }
+
+  async function attachmentUrl(roomId, key) {
+    const signedUrl = await mediaStorage.createDownloadUrl(key);
+    if (signedUrl) return signedUrl;
+    return `${BACKEND_URL}${API_BASE}/rooms/${roomId}/uploads/${path.basename(key)}`;
+  }
+
+  async function profileAvatarUrl(userId, key) {
+    const signedUrl = await mediaStorage.createDownloadUrl(key);
+    if (signedUrl) return signedUrl;
+    return `${BACKEND_URL}${API_BASE}/users/${userId}/avatar/${path.basename(key)}`;
+  }
+
+  async function groupAvatarUrl(key) {
+    const signedUrl = await mediaStorage.createDownloadUrl(key);
+    if (signedUrl) return signedUrl;
+    return `${BACKEND_URL}${API_BASE}/uploads/${path.basename(key)}`;
   }
 
   async function serializeRoomForUser(room, userId) {
@@ -91,12 +126,16 @@ module.exports = function createChatCore({ prisma, config, mediaKey }) {
       createdById = sorted[0]?.userId || null;
     }
 
-    const { avatarStorageKey: _avatarStorageKey, ...publicRoom } = room;
-    const members = room.members?.map((member) => {
+    const { avatarStorageKey, ...publicRoom } = room;
+    if (avatarStorageKey) publicRoom.avatarUrl = await groupAvatarUrl(avatarStorageKey);
+    else publicRoom.avatarUrl = normalizeLegacyMediaUrl(publicRoom.avatarUrl);
+    const members = await Promise.all((room.members || []).map(async (member) => {
       if (!member.user) return member;
-      const { avatarStorageKey: _userAvatarStorageKey, ...publicUser } = member.user;
+      const { avatarStorageKey, ...publicUser } = member.user;
+      if (avatarStorageKey) publicUser.avatarUrl = await profileAvatarUrl(member.user.id, avatarStorageKey);
+      else publicUser.avatarUrl = normalizeLegacyMediaUrl(publicUser.avatarUrl);
       return { ...member, user: publicUser };
-    });
+    }));
 
     return {
       ...publicRoom,
@@ -109,7 +148,7 @@ module.exports = function createChatCore({ prisma, config, mediaKey }) {
 
   function roomMediaStorageKey(projectId, room, fileUrl) {
     try {
-      const url = new URL(String(fileUrl));
+      const url = new URL(String(fileUrl), BACKEND_URL);
       const prefix = `${API_BASE}/rooms/${room.id}/uploads/`;
       if (url.origin !== new URL(BACKEND_URL).origin || !url.pathname.startsWith(prefix) || url.search || url.hash) return null;
       const filename = path.basename(url.pathname);
@@ -231,6 +270,8 @@ module.exports = function createChatCore({ prisma, config, mediaKey }) {
     decryptContent,
     decryptMessage,
     serializeRoomForUser,
+    profileAvatarUrl,
+    normalizeLegacyMediaUrl,
     roomMediaStorageKey,
     parseFeatureFlag,
     resolveChatCapabilities,

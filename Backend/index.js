@@ -13,7 +13,7 @@ const crypto = require("crypto");
 const path = require("path");
 
 const { app, server, prisma, io } = createApp(config);
-const chatCore = createChatCore({ prisma, config, mediaKey });
+const chatCore = createChatCore({ prisma, config, mediaKey, mediaStorage });
 const projectAuth = createProjectAuth({
   prisma,
   jwt,

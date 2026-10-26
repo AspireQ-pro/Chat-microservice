@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useSelector } from 'react-redux'
 import { Box, Typography, Button, IconButton, TextField, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material'
+import { API_BASE } from '../features/media/upload'
 import { Check, AccessTime, Edit, Delete, Close, Send } from '@mui/icons-material'
 
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
@@ -51,7 +52,17 @@ function MessageBubble({ message, onRetry, onEdit, onDelete }) {
     const controller = new AbortController()
     let objectUrl = null
     setAttachmentUrl(null)
-    fetch(message.fileUrl, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
+    let headers = {}
+    try {
+      // S3 presigned URLs authenticate through their query signature. Send the
+      // Chat JWT only when the URL is a legacy/backend media endpoint.
+      if (new URL(message.fileUrl, window.location.href).origin === new URL(API_BASE, window.location.href).origin) {
+        headers = { Authorization: `Bearer ${token}` }
+      }
+    } catch {
+      headers = { Authorization: `Bearer ${token}` }
+    }
+    fetch(message.fileUrl, { headers, signal: controller.signal })
       .then((r) => { if (!r.ok) throw new Error(); return r.blob() })
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob)

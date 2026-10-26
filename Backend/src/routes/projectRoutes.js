@@ -6,6 +6,7 @@ module.exports = function registerProjectRoutes(context) {
     completePresignedMediaUpload, requireRoomUploadAccess,
     hasAllowedFileSignature, sendError, asyncHandler, generateApiKey,
     encryptContent, decryptContent, decryptMessage, serializeRoomForUser,
+    profileAvatarUrl, normalizeLegacyMediaUrl,
     roomMediaStorageKey, resolveProject, authenticateChatJWT,
     parseFeatureFlag, resolveChatCapabilities, getProjectPermissions,
     crypto, jwt, path, io,
@@ -317,7 +318,12 @@ app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
       where,
       orderBy: { name: "asc" },
     });
-    res.json(users.map(({ avatarStorageKey: _storageKey, ...user }) => user));
+    res.json(await Promise.all(users.map(async ({ avatarStorageKey, ...user }) => ({
+      ...user,
+      avatarUrl: avatarStorageKey
+        ? await profileAvatarUrl(user.id, avatarStorageKey)
+        : normalizeLegacyMediaUrl(user.avatarUrl),
+    }))));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

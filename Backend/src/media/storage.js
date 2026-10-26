@@ -1,11 +1,23 @@
 const fs = require("fs");
 const path = require("path");
 const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { getSignedUrl: getCloudFrontSignedUrl } = require("@aws-sdk/cloudfront-signer");
 
 const uploadDir = path.join(__dirname, "..", "..", "uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const bucket = process.env.S3_BUCKET || process.env.AWS_S3_BUCKET;
+const cloudFrontDomain = (process.env.MEDIA_CDN_DOMAIN || "").trim().replace(/^https?:\/\//i, "").replace(/\/$/, "");
+const cloudFrontKeyPairId = (process.env.CLOUDFRONT_KEY_PAIR_ID || "").trim();
+const cloudFrontPrivateKeyBase64 = (process.env.CLOUDFRONT_PRIVATE_KEY_BASE64 || "").trim();
+const cloudFrontSigningConfigured = Boolean(cloudFrontDomain || cloudFrontKeyPairId || cloudFrontPrivateKeyBase64);
+if (cloudFrontSigningConfigured && !(cloudFrontDomain && cloudFrontKeyPairId && cloudFrontPrivateKeyBase64)) {
+  throw new Error("CloudFront signing requires MEDIA_CDN_DOMAIN, CLOUDFRONT_KEY_PAIR_ID, and CLOUDFRONT_PRIVATE_KEY_BASE64");
+}
+const cloudFrontPrivateKey = cloudFrontPrivateKeyBase64
+  ? Buffer.from(cloudFrontPrivateKeyBase64, "base64").toString("utf8")
+  : null;
 let s3;
 let s3Commands;
 if (bucket) {
@@ -46,6 +58,30 @@ async function createUploadForm({ key, contentType, maxSize }) {
       ["eq", "$Content-Type", contentType],
     ],
   });
+}
+
+async function createDownloadUrl(key, expiresIn = 300) {
+  if (!isS3Enabled) return null;
+  if (cloudFrontSigningConfigured) {
+    const encodedKey = String(key).split("/").map(encodeURIComponent).join("/");
+    const url = `https://${cloudFrontDomain}/${encodedKey}`;
+    return getCloudFrontSignedUrl({
+      url,
+      keyPairId: cloudFrontKeyPairId,
+      privateKey: cloudFrontPrivateKey,
+      dateLessThan: new Date(Date.now() + expiresIn * 1000).toISOString(),
+    });
+  }
+  return getSignedUrl(
+    s3,
+    new s3Commands.GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ResponseContentDisposition: "inline",
+      ResponseCacheControl: "private, max-age=300",
+    }),
+    { expiresIn },
+  );
 }
 
 async function finalizeUpload({ stagingKey, finalKey, contentType, maxSize, verifySignature }) {
@@ -125,4 +161,4 @@ async function deleteObject(key) {
   await fs.promises.unlink(path.join(uploadDir, path.basename(key))).catch(() => {});
 }
 
-module.exports = { isS3Enabled, putObject, createUploadForm, finalizeUpload, getDownloadTarget, objectExists, deleteObject };
+module.exports = { isS3Enabled, putObject, createUploadForm, createDownloadUrl, finalizeUpload, getDownloadTarget, objectExists, deleteObject };

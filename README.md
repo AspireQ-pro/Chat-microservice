@@ -133,6 +133,9 @@ window.addEventListener("message", (event) => {
 | `BACKEND_URL`                 | Public backend URL used for upload links                  | `http://localhost:5000`                                           |
 | `AWS_REGION`                  | AWS region containing the private media bucket            | `ap-south-1`                                                      |
 | `S3_BUCKET`                   | Private S3 bucket for chat media; unset uses local uploads | unset                                                            |
+| `MEDIA_CDN_DOMAIN`            | Optional CloudFront hostname for private media downloads   | unset                                                            |
+| `CLOUDFRONT_KEY_PAIR_ID`      | CloudFront public key ID used to sign private download URLs | unset                                                           |
+| `CLOUDFRONT_PRIVATE_KEY_BASE64` | Base64-encoded CloudFront signing private key (backend secret) | unset                                                        |
 
 Production startup fails if secrets, HTTPS URLs, or explicit CORS origins are missing. Do not use placeholder values. Copy the root `.env.example` to `.env`, fill it locally, and keep `.env` out of source control.
 
@@ -423,7 +426,7 @@ Form field: `file`. Images render in the conversation; PDFs open in a new tab.
 
 ### Media Storage (S3)
 
-Set `S3_BUCKET` (or `AWS_S3_BUCKET`) and `AWS_REGION` on the backend to enable direct S3 uploads. The value must be the bucket name, for example `aspireq-chat-service`; the bucket URL is not required. The client asks the API for a short-lived presigned POST, uploads straight to S3, and calls a completion endpoint. The backend checks the upload's size, content type, and file signature, then moves it from `pending/` to its final key. Downloads are authorized by the API, which redirects to a short-lived presigned GET URL. Existing local uploads remain readable as a fallback during migration; when no bucket is configured, the client uses the local backend upload path.
+Set `S3_BUCKET` (or `AWS_S3_BUCKET`) and `AWS_REGION` on the backend to enable direct S3 uploads. The value must be the bucket name, for example `aspireq-chat-service`; the bucket URL is not required. The client asks the API for a short-lived presigned POST, uploads straight to S3, and calls a completion endpoint. The backend checks the upload's size, content type, and file signature, then moves it from `pending/` to its final key. Authorized message and room responses create short-lived signed download URLs from stored object keys. By default, these are S3-signed URLs. To serve downloads through private CloudFront, set `MEDIA_CDN_DOMAIN`, `CLOUDFRONT_KEY_PAIR_ID`, and `CLOUDFRONT_PRIVATE_KEY_BASE64`; CloudFront must have a trusted key group configured on the matching behavior, and S3 must remain private behind Origin Access Control. Direct uploads still go to S3. Existing local uploads remain readable through the backend fallback during migration; when no bucket is configured, the client uses the local backend upload path.
 
 Configure S3 CORS to allow the Chat frontend origins for `POST`, `GET`, and `HEAD`, and allow the `Content-Type` header. Keep public bucket access blocked and enable bucket default encryption. The backend role needs `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the media prefixes; the copy from `pending/` uses source read and destination write permissions. Add a lifecycle rule to expire objects under `pending/` after one day.
 
@@ -452,7 +455,7 @@ societies/<projectId>/media/chats/groups/<roomId>/attachments/<fileId>.<ext>
 
 The group-avatar path is shared within a society because the avatar is uploaded before its room is created. Message media uses the room ID, including one-to-one conversations, so authorization and cleanup remain scoped to a room. Existing objects remain at their old keys and are read using the stored database key or a legacy-key fallback; no bulk S3 move is required.
 
-The backend stores the final S3 key in `ChatUser.avatarStorageKey`, `ChatRoom.avatarStorageKey`, or `Message.fileStorageKey`, as appropriate. Keys stay server-side and are not sent to the frontend. The migration adds these nullable fields, so older media continues to resolve using the existing URL while new uploads save their key.
+The backend stores the final S3 key in `ChatUser.avatarStorageKey`, `ChatRoom.avatarStorageKey`, or `Message.fileStorageKey`, as appropriate. Keys stay server-side and are not sent to the frontend. The migration adds these nullable fields and clears duplicate URLs where a key is present, so older media without a key continues to resolve using its legacy URL while new uploads save only their key.
 
 Upload a profile image with `POST /api/users/me/avatar` using the multipart `file` field and Chat JWT. It returns `{ "avatarUrl": "..." }`; the client can use that URL as the user's `avatarUrl`. Group avatars use `POST /api/rooms/group/avatar`, and direct/group attachments use `POST /api/rooms/:roomId/upload`.
 

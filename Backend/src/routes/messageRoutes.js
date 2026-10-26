@@ -63,7 +63,7 @@ app.get(
         where: { roomId },
         select: { userId: true, lastReadAt: true },
       });
-      const messages = page.reverse().map((message) => {
+      const messages = await Promise.all(page.reverse().map(async (message) => {
         const readBy = roomMembers
           .filter(
             (member) =>
@@ -76,11 +76,11 @@ app.get(
           (member) => member.userId !== message.senderId,
         ).length;
         return {
-          ...decryptMessage(message),
+          ...await decryptMessage(message),
           readBy,
           recipientCount,
         };
-      });
+      }));
       const nextBefore = messages.length ? messages[0].createdAt : null;
 
       res.json({ messages, hasMore, nextBefore });
