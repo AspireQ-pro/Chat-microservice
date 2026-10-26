@@ -80,6 +80,8 @@ function normalizeMessage(m, currentUserId) {
     mine,
     readBy,
     recipientCount,
+    isDeleted: Boolean(m.isDeleted),
+    editedAt: m.editedAt || null,
     status: mine ? (isRead ? "read" : m.deliveredAt ? "delivered" : "sent") : undefined,
   };
 }
@@ -628,6 +630,38 @@ const chatSlice = createSlice({
         );
       }
     },
+    messageEdited(state, { payload }) {
+      // payload: { message } — the full updated message from the server
+      const msg = payload?.message;
+      if (!msg?.id || !msg?.roomId) return;
+      const list = state.messages[msg.roomId];
+      if (!list) return;
+      const idx = list.findIndex((m) => m.id === msg.id);
+      if (idx !== -1) {
+        list[idx] = {
+          ...list[idx],
+          text: msg.content || "",
+          editedAt: msg.editedAt || null,
+        };
+      }
+    },
+    messageDeleted(state, { payload }) {
+      // payload: { messageId, roomId }
+      const { messageId, roomId } = payload || {};
+      if (!messageId || !roomId) return;
+      const list = state.messages[roomId];
+      if (!list) return;
+      const idx = list.findIndex((m) => m.id === messageId);
+      if (idx !== -1) {
+        list[idx] = {
+          ...list[idx],
+          isDeleted: true,
+          text: "",
+          fileUrl: null,
+          fileType: null,
+        };
+      }
+    },
     setConnected(state, { payload }) {
       state.connected = payload;
     },
@@ -838,6 +872,8 @@ export const {
   groupCreated,
   groupInfoUpdated,
   memberRemovedFromGroup,
+  messageEdited,
+  messageDeleted,
   setConnected,
   setOnlineUsers,
   userOffline,

@@ -18,6 +18,8 @@ import {
   groupCreated,
   groupInfoUpdated,
   memberRemovedFromGroup,
+  messageEdited,
+  messageDeleted,
   setConnected,
   setOnlineUsers,
   userOffline,
@@ -323,6 +325,14 @@ export function useChatHandler() {
         dispatch(memberRemovedFromGroup(p));
       }
     };
+    const onMessageEdited = (p) => {
+      if (!p?.message) return;
+      dispatch(messageEdited(p));
+    };
+    const onMessageDeleted = (p) => {
+      if (!p?.messageId) return;
+      dispatch(messageDeleted(p));
+    };
 
     socket.on("connect", onConnectWithReconnect);
     socket.on("disconnect", onDisconnect);
@@ -336,6 +346,8 @@ export function useChatHandler() {
     socket.on("group_created", onGroupCreated);
     socket.on("group_updated", onGroupUpdated);
     socket.on("member_removed", onMemberRemoved);
+    socket.on("message_edited", onMessageEdited);
+    socket.on("message_deleted", onMessageDeleted);
 
     if (socket.connected) onConnectWithReconnect();
 
@@ -352,6 +364,8 @@ export function useChatHandler() {
       socket.off("group_created", onGroupCreated);
       socket.off("group_updated", onGroupUpdated);
       socket.off("member_removed", onMemberRemoved);
+      socket.off("message_edited", onMessageEdited);
+      socket.off("message_deleted", onMessageDeleted);
     };
   }, [dispatch, currentUser?.id, authToken]);
 
@@ -692,6 +706,18 @@ export function useChatHandler() {
     [dispatch, groupName, groupMemberIds, currentUser?.allowGroupChat, closeGroupDialog, isMobile],
   );
 
+  const handleEditMessage = useCallback((messageId, newContent) => {
+    const socket = getSocket();
+    if (!socket?.connected) return;
+    socket.emit("edit_message", { messageId, content: newContent });
+  }, []);
+
+  const handleDeleteMessage = useCallback((messageId) => {
+    const socket = getSocket();
+    if (!socket?.connected) return;
+    socket.emit("delete_message", { messageId });
+  }, []);
+
   return {
     input,
     search,
@@ -738,5 +764,7 @@ export function useChatHandler() {
     closeGroupDialog,
     toggleGroupMember,
     handleCreateGroup,
+    handleEditMessage,
+    handleDeleteMessage,
   };
 }

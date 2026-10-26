@@ -83,6 +83,8 @@ model Message {
   isRead      Boolean  @default(false)
   readAt      DateTime?
   deliveredAt DateTime?
+  editedAt    DateTime?
+  isDeleted   Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   room       ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)

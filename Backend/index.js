@@ -2429,6 +2429,97 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ─── Edit a sent message (sender only, text messages only) ───────────────
+  socket.on("edit_message", async ({ messageId, content }) => {
+    if (!messageId || !content?.trim()) {
+      return socket.emit("error", { message: "messageId and content are required" });
+    }
+    try {
+      const msg = await prisma.message.findFirst({
+        where: { id: messageId },
+        include: { sender: true },
+      });
+      if (!msg) return socket.emit("error", { message: "Message not found" });
+      if (msg.senderId !== socket.userId) {
+        return socket.emit("error", { message: "You can only edit your own messages" });
+      }
+      if (msg.isDeleted) {
+        return socket.emit("error", { message: "Cannot edit a deleted message" });
+      }
+      if (msg.messageType !== "text") {
+        return socket.emit("error", { message: "Only text messages can be edited" });
+      }
+      // Verify the message belongs to this project via the room
+      const room = await prisma.chatRoom.findFirst({
+        where: { id: msg.roomId, projectId: socket.projectId },
+      });
+      if (!room) return socket.emit("error", { message: "Room not found" });
+
+      const now = new Date();
+      const updated = await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          content: encryptContent(content.trim()),
+          editedAt: now,
+        },
+        include: { sender: true },
+      });
+
+      // Update room preview if this was the last message
+      if (room.lastMessageAt && new Date(room.lastMessageAt).getTime() <= new Date(updated.createdAt).getTime()) {
+        await prisma.chatRoom.update({
+          where: { id: msg.roomId },
+          data: { lastMessagePreview: encryptContent(content.trim().slice(0, 100)) },
+        }).catch(() => {});
+      }
+
+      const outgoing = {
+        ...decryptMessage(updated),
+        editedAt: now,
+      };
+      io.to(msg.roomId).emit("message_edited", { message: outgoing });
+    } catch (err) {
+      console.error("edit_message error", err);
+      socket.emit("error", { message: "Failed to edit message" });
+    }
+  });
+
+  // ─── Delete a message for everyone (sender only) ──────────────────────────
+  socket.on("delete_message", async ({ messageId }) => {
+    if (!messageId) {
+      return socket.emit("error", { message: "messageId is required" });
+    }
+    try {
+      const msg = await prisma.message.findFirst({
+        where: { id: messageId },
+      });
+      if (!msg) return socket.emit("error", { message: "Message not found" });
+      if (msg.senderId !== socket.userId) {
+        return socket.emit("error", { message: "You can only delete your own messages" });
+      }
+      // Verify the message belongs to this project
+      const room = await prisma.chatRoom.findFirst({
+        where: { id: msg.roomId, projectId: socket.projectId },
+      });
+      if (!room) return socket.emit("error", { message: "Room not found" });
+
+      await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          isDeleted: true,
+          content: null,       // wipe encrypted content
+          fileUrl: null,
+          fileType: null,
+        },
+      });
+
+      io.to(msg.roomId).emit("message_deleted", { messageId, roomId: msg.roomId });
+    } catch (err) {
+      console.error("delete_message error", err);
+      socket.emit("error", { message: "Failed to delete message" });
+    }
+  });
+
   socket.on("disconnect", () => {
     onlineUsers.delete(socket.id);
     broadcastOnlineUsers(socket.projectId);
