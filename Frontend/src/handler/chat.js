@@ -326,10 +326,12 @@ export function useChatHandler() {
       }
     };
     const onMessageEdited = (p) => {
+      console.log('[socket] message_edited received', p);
       if (!p?.message) return;
       dispatch(messageEdited(p));
     };
     const onMessageDeleted = (p) => {
+      console.log('[socket] message_deleted received', p);
       if (!p?.messageId) return;
       dispatch(messageDeleted(p));
     };
@@ -708,13 +710,21 @@ export function useChatHandler() {
 
   const handleEditMessage = useCallback((messageId, newContent) => {
     const socket = getSocket();
-    if (!socket?.connected) return;
+    if (!socket?.connected) {
+      console.warn('[handleEditMessage] Socket not connected');
+      return;
+    }
+    console.log('[handleEditMessage] Emitting edit_message', { messageId, content: newContent.slice(0, 50) });
     socket.emit("edit_message", { messageId, content: newContent });
   }, []);
 
   const handleDeleteMessage = useCallback((messageId) => {
     const socket = getSocket();
-    if (!socket?.connected) return;
+    if (!socket?.connected) {
+      console.warn('[handleDeleteMessage] Socket not connected');
+      return;
+    }
+    console.log('[handleDeleteMessage] Emitting delete_message', { messageId });
     socket.emit("delete_message", { messageId });
   }, []);
 
