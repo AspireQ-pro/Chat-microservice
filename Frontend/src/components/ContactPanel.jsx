@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Box,
   Typography,
@@ -7,15 +7,21 @@ import {
   InputAdornment,
   IconButton,
   Tooltip,
+  CircularProgress,
+  Snackbar,
+  Alert,
 } from "@mui/material";
 import arrowIcon from "@/assets/arrow.svg";
 import {
   Search,
   GroupAdd,
+  CameraAlt,
 } from "@mui/icons-material";
 import ContactItem from "./ContactItem";
 import GroupItem from "./GroupItem";
-import { useSelector } from "react-redux";
+import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
+import { useSelector, useDispatch } from "react-redux";
+import { uploadProfileAvatar } from "@/provider/chatSlice";
 
 function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, handleSelectRoom, onGroupInfoClick }) {
   return (
@@ -104,12 +110,39 @@ function ContactPanel({
   setShowPanel,
   onGroupInfoClick,
 }) {
+  const dispatch = useDispatch();
   const user = useSelector((s) => s.auth.user);
   const allowGroupChat = Boolean(user?.allowGroupChat);
   const allowDirectChat = Boolean(user?.allowDirectChat);
   const showTabs = allowGroupChat && allowDirectChat;
 
   const [activeTab, setActiveTab] = useState(0); // 0 = Direct Chats, 1 = Groups
+
+  // ── Profile avatar upload state ──
+  const [myAvatarUrl, setMyAvatarUrl] = useState(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
+  const [avatarSuccess, setAvatarSuccess] = useState(false);
+  const avatarInputRef = useRef(null);
+
+  const handleAvatarChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploadingAvatar(true);
+    setAvatarError("");
+    try {
+      const result = await dispatch(uploadProfileAvatar({ file })).unwrap();
+      if (result?.avatarUrl) {
+        setMyAvatarUrl(result.avatarUrl);
+        setAvatarSuccess(true);
+      }
+    } catch (err) {
+      setAvatarError(err?.message || "Failed to upload profile picture");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const searchLower = (search || "").trim().toLowerCase();
   const groupRooms = rooms
@@ -193,7 +226,51 @@ function ContactPanel({
               ? "Individual Chats"
               : "Chats"}
         </Typography>
+
+        {/* My profile avatar — click to upload */}
+        <Tooltip title="Change profile picture" disableTouchListener>
+          <Box
+            sx={{ position: "relative", flexShrink: 0, cursor: "pointer" }}
+            onClick={() => !uploadingAvatar && avatarInputRef.current?.click()}
+          >
+            <AuthenticatedAvatar
+              src={myAvatarUrl || undefined}
+              sx={{ width: 36, height: 36, bgcolor: "#3C4F4A", fontSize: "0.8rem", fontWeight: 700 }}
+            >
+              {(user?.name || "?").split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)}
+            </AuthenticatedAvatar>
+            {/* Camera overlay */}
+            {uploadingAvatar ? (
+              <Box sx={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: "rgba(0,0,0,0.45)", borderRadius: "50%" }}>
+                <CircularProgress size={14} sx={{ color: "#fff" }} />
+              </Box>
+            ) : (
+              <Box sx={{
+                position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                bgcolor: "rgba(0,0,0,0.35)", borderRadius: "50%", opacity: 0,
+                transition: "opacity 0.2s", "&:hover": { opacity: 1 },
+              }}>
+                <CameraAlt sx={{ fontSize: 14, color: "#fff" }} />
+              </Box>
+            )}
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              style={{ display: "none" }}
+              onChange={handleAvatarChange}
+            />
+          </Box>
+        </Tooltip>
       </Box>
+
+      {/* Toast feedback */}
+      <Snackbar open={avatarSuccess} autoHideDuration={3000} onClose={() => setAvatarSuccess(false)} anchorOrigin={{ vertical: "top", horizontal: "center" }}>
+        <Alert severity="success" onClose={() => setAvatarSuccess(false)} sx={{ width: "100%" }}>Profile picture updated</Alert>
+      </Snackbar>
+      <Snackbar open={Boolean(avatarError)} autoHideDuration={4000} onClose={() => setAvatarError("")} anchorOrigin={{ vertical: "top", horizontal: "center" }}>
+        <Alert severity="error" onClose={() => setAvatarError("")} sx={{ width: "100%" }}>{avatarError}</Alert>
+      </Snackbar>
 
       {/* Search */}
       {(allowGroupChat || allowDirectChat) && (
