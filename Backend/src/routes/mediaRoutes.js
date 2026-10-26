@@ -115,7 +115,7 @@ app.get(
 
     const category = room.isGroup ? "groups" : "direct";
     const key = referenced.fileStorageKey || legacyMediaKey(req.projectId, category, roomId, filename);
-    await sendStoredMedia(res, key);
+    await sendStoredMedia(req, res, key);
   }),
 );
 
@@ -148,7 +148,7 @@ app.get(
     if (!room) return res.status(404).json({ error: "Not found" });
 
     const key = room.avatarStorageKey || legacyMediaKey(req.projectId, "groups/avatars", "shared", filename);
-    await sendStoredMedia(res, key);
+    await sendStoredMedia(req, res, key);
   }),
 );
 

@@ -1,7 +1,6 @@
 const fs = require("fs");
 const path = require("path");
 const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const uploadDir = path.join(__dirname, "..", "..", "uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -82,18 +81,23 @@ async function finalizeUpload({ stagingKey, finalKey, contentType, maxSize, veri
   return { size: head.ContentLength };
 }
 
-async function getDownloadTarget(key) {
+async function getDownloadTarget(key, range) {
   const localPath = path.join(uploadDir, path.basename(key));
   if (!isS3Enabled) return { path: localPath };
 
   try {
-    await s3.send(new s3Commands.HeadObjectCommand({ Bucket: bucket, Key: key }));
-    const url = await getSignedUrl(s3, new s3Commands.GetObjectCommand({
+    const result = await s3.send(new s3Commands.GetObjectCommand({
       Bucket: bucket,
       Key: key,
-      ResponseContentDisposition: "inline",
-    }), { expiresIn: 300 });
-    return { url };
+      ...(range ? { Range: range } : {}),
+    }));
+    return {
+      body: result.Body,
+      contentType: result.ContentType,
+      contentLength: result.ContentLength,
+      contentRange: result.ContentRange,
+      acceptRanges: result.AcceptRanges,
+    };
   } catch (error) {
     // Let older local uploads continue to work during storage migration.
     if (error.name !== "NoSuchKey" && error.name !== "NotFound" && error.$metadata?.httpStatusCode !== 404) throw error;

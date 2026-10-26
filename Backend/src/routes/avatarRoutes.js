@@ -142,7 +142,7 @@ app.get(
     });
     if (!user) return res.status(404).json({ error: "Not found" });
     const key = user.avatarStorageKey || legacyMediaKey(req.projectId, "users/profile", userId, filename);
-    await sendStoredMedia(res, key);
+    await sendStoredMedia(req, res, key);
   }),
 );
 

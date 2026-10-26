@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { pipeline } = require("node:stream/promises");
 
 module.exports = function createMediaUploadService({
   prisma,
@@ -12,10 +13,23 @@ module.exports = function createMediaUploadService({
 }) {
   const { API_BASE, BACKEND_URL, CHAT_JWT_SECRET, UPLOAD_TYPES } = config;
 
-  async function sendStoredMedia(res, key) {
-    const target = await mediaStorage.getDownloadTarget(key);
+  async function sendStoredMedia(req, res, key) {
+    const target = await mediaStorage.getDownloadTarget(key, req.headers.range);
     res.setHeader("X-Content-Type-Options", "nosniff");
-    if (target.url) return res.redirect(302, target.url);
+    res.setHeader("Cache-Control", "private, no-store");
+    if (target.body) {
+      res.setHeader("Content-Type", target.contentType || "application/octet-stream");
+      res.setHeader("Accept-Ranges", target.acceptRanges || "bytes");
+      if (target.contentLength != null) {
+        res.setHeader("Content-Length", target.contentLength);
+      }
+      if (target.contentRange) {
+        res.status(206);
+        res.setHeader("Content-Range", target.contentRange);
+      }
+      await pipeline(target.body, res);
+      return;
+    }
     res.setHeader("Content-Disposition", "inline");
     return res.sendFile(target.path, (err) => {
       if (err && !res.headersSent) res.status(err.statusCode || 404).end();
