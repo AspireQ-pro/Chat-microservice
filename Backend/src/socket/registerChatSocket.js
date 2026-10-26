@@ -399,6 +399,59 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("edit_message", async ({ messageId, content }) => {
+    if (!messageId || !content?.trim()) return;
+    try {
+      // Verify the message exists, belongs to this project, and was sent by this user.
+      const message = await prisma.message.findFirst({
+        where: { id: messageId, senderId: socket.userId },
+        include: { room: true, sender: true },
+      });
+      if (!message) return socket.emit("error", { message: "Message not found or unauthorized" });
+      if (message.room.projectId !== socket.projectId)
+        return socket.emit("error", { message: "Unauthorized" });
+      if (message.isDeleted) return socket.emit("error", { message: "Cannot edit a deleted message" });
+      if (message.messageType !== "text") return socket.emit("error", { message: "Only text messages can be edited" });
+
+      const updated = await prisma.message.update({
+        where: { id: messageId },
+        data: { content: encryptContent(content.trim()), editedAt: new Date() },
+        include: { sender: true },
+      });
+
+      const decrypted = await decryptMessage(updated);
+      io.to(message.roomId).emit("message_edited", { message: decrypted });
+    } catch (err) {
+      console.error("edit_message error", err);
+      socket.emit("error", { message: "Failed to edit message" });
+    }
+  });
+
+  socket.on("delete_message", async ({ messageId }) => {
+    if (!messageId) return;
+    try {
+      // Verify the message exists, belongs to this project, and was sent by this user.
+      const message = await prisma.message.findFirst({
+        where: { id: messageId, senderId: socket.userId },
+        include: { room: true },
+      });
+      if (!message) return socket.emit("error", { message: "Message not found or unauthorized" });
+      if (message.room.projectId !== socket.projectId)
+        return socket.emit("error", { message: "Unauthorized" });
+      if (message.isDeleted) return; // already deleted — no-op
+
+      await prisma.message.update({
+        where: { id: messageId },
+        data: { isDeleted: true, content: null },
+      });
+
+      io.to(message.roomId).emit("message_deleted", { messageId, roomId: message.roomId });
+    } catch (err) {
+      console.error("delete_message error", err);
+      socket.emit("error", { message: "Failed to delete message" });
+    }
+  });
+
   socket.on("disconnect", () => {
     onlineUsers.delete(socket.id);
     broadcastOnlineUsers(socket.projectId);
