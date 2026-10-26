@@ -721,6 +721,7 @@ const chatSlice = createSlice({
           email: u.email,
           role: u.role || "member",
           lastSeenAt: u.lastSeenAt,
+          avatarUrl: u.avatarUrl || null,
           avatar: (u.name || "?")
             .split(" ")
             .map((w) => w[0])

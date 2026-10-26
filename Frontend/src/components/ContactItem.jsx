@@ -1,6 +1,7 @@
 import React from "react";
-import { Box, Typography, Avatar, Badge } from "@mui/material";
+import { Box, Typography, Badge } from "@mui/material";
 import { Circle } from "@mui/icons-material";
+import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
 
 function formatTime(dateStr) {
   if (!dateStr) return "";
@@ -46,7 +47,8 @@ function ContactItem({ contact, active, lastMessage, unread, onClick }) {
           />
         }
       >
-        <Avatar
+        <AuthenticatedAvatar
+          src={contact.avatarUrl || undefined}
           sx={{
             bgcolor: active ? "#3C4F4A" : "#90a4ae",
             width: 46,
@@ -57,7 +59,7 @@ function ContactItem({ contact, active, lastMessage, unread, onClick }) {
           }}
         >
           {contact.avatar}
-        </Avatar>
+        </AuthenticatedAvatar>
       </Badge>
 
       {/* Text block — fills remaining space */}
