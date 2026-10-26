@@ -121,7 +121,7 @@ app.get(
 
 // â”€â”€â”€ Serve general uploads (group avatars etc.) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // GET /api/uploads/:filename
-// JWT-protected. Any authenticated member of the same project can load avatars.
+// JWT-protected. Only members of the group can load its avatar.
 app.get(
   `${API_BASE}/uploads/:filename`,
   authenticateChatJWT,
@@ -139,6 +139,8 @@ app.get(
     const room = await prisma.chatRoom.findFirst({
       where: {
         projectId: req.projectId,
+        isGroup: true,
+        members: { some: { userId: req.userId } },
         avatarUrl: { endsWith: `/uploads/${filename}` },
       },
       select: { id: true, avatarStorageKey: true },
