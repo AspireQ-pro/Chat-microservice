@@ -73,6 +73,17 @@ function CreateGroupDialog({
   const handlePhotoChange = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
+      setPhotoError('Choose a JPEG, PNG, GIF, or WebP image.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setPhotoError('Group images must be 10 MB or smaller.')
+      e.target.value = ''
+      return
+    }
+    setPhotoError('')
     if (groupPhoto?.previewUrl) URL.revokeObjectURL(groupPhoto.previewUrl)
     setGroupPhoto({ file, previewUrl: URL.createObjectURL(file) })
     // Reset input so picking the same file again still triggers onChange
@@ -341,7 +352,7 @@ function CreateGroupDialog({
           <input
             ref={photoInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/gif,image/webp"
             style={{ display: 'none' }}
             onChange={handlePhotoChange}
           />

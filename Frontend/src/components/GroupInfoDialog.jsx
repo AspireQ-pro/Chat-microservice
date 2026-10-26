@@ -12,6 +12,7 @@ import {
 } from '@mui/icons-material'
 import { useTheme, useMediaQuery } from '@mui/material'
 import { useDispatch } from 'react-redux'
+import AuthenticatedAvatar from '@/features/media/AuthenticatedAvatar'
 import {
   updateGroupInfo,
   addGroupMembers,
@@ -147,6 +148,17 @@ function GroupInfoDialog({
   const handlePhotoChange = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
+      setSaveError('Choose a JPEG, PNG, GIF, or WebP image.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setSaveError('Group images must be 10 MB or smaller.')
+      e.target.value = ''
+      return
+    }
+    setSaveError('')
     if (editPhoto?.previewUrl) URL.revokeObjectURL(editPhoto.previewUrl)
     setEditPhoto({ file, previewUrl: URL.createObjectURL(file) })
     e.target.value = ''
@@ -241,7 +253,7 @@ function GroupInfoDialog({
           }}
         >
           <Box sx={{ position: 'relative' }}>
-            <Avatar
+            <AuthenticatedAvatar
               src={room?.avatarUrl || undefined}
               sx={{
                 width: 80,
@@ -252,7 +264,7 @@ function GroupInfoDialog({
               }}
             >
               {initials(room?.name || 'GR')}
-            </Avatar>
+            </AuthenticatedAvatar>
             {isOwner && (
               <Tooltip title="Edit group">
                 <Box
@@ -491,7 +503,7 @@ function GroupInfoDialog({
           <input
             ref={photoInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/gif,image/webp"
             style={{ display: 'none' }}
             onChange={handlePhotoChange}
           />
@@ -499,7 +511,7 @@ function GroupInfoDialog({
             sx={{ position: 'relative', cursor: 'pointer' }}
             onClick={() => photoInputRef.current?.click()}
           >
-            <Avatar
+            <AuthenticatedAvatar
               src={editPhoto?.previewUrl || room?.avatarUrl || undefined}
               sx={{
                 width: 80,
@@ -509,7 +521,7 @@ function GroupInfoDialog({
               }}
             >
               {!editPhoto && !room?.avatarUrl && '🌱'}
-            </Avatar>
+            </AuthenticatedAvatar>
             <Box
               sx={{
                 position: 'absolute', bottom: 0, right: 0,

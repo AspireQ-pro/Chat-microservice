@@ -173,6 +173,7 @@ app.patch(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (
   if (avatarUrl !== undefined) {
     if (!avatarUrl) {
       updateData.avatarUrl = null;
+      updateData.avatarStorageKey = null;
     } else {
       try {
         const u = new URL(String(avatarUrl));
@@ -184,7 +185,17 @@ app.patch(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (
         if (!/^[0-9a-f-]{36}\.(jpg|png|gif|webp)$/i.test(filename)) {
           return sendError(res, 400, 'Invalid avatar file');
         }
+        const storageKey = mediaKey(
+          req.projectId,
+          'groups/avatars',
+          'shared',
+          filename,
+        );
+        if (!(await mediaStorage.objectExists(storageKey))) {
+          return sendError(res, 400, 'Group avatar upload was not found');
+        }
         updateData.avatarUrl = avatarUrl;
+        updateData.avatarStorageKey = storageKey;
       } catch {
         return sendError(res, 400, 'Invalid avatar URL');
       }
