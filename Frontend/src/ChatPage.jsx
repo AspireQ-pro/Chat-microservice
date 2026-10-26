@@ -54,6 +54,8 @@ function ChatPage() {
     closeGroupDialog,
     toggleGroupMember,
     handleCreateGroup,
+    handleEditMessage,
+    handleDeleteMessage,
   } = useChatHandler();
 
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
@@ -113,6 +115,8 @@ function ChatPage() {
       handleKeyDown={handleKeyDown}
       setShowPanel={setShowPanel}
       onViewMembers={() => openGroupInfo(activeRoom)}
+      onEditMessage={handleEditMessage}
+      onDeleteMessage={handleDeleteMessage}
     />
   );
 

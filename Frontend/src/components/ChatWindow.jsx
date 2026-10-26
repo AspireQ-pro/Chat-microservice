@@ -44,6 +44,8 @@ function ChatWindow({
   handleKeyDown,
   setShowPanel,
   onViewMembers,
+  onEditMessage,
+  onDeleteMessage,
 }) {
   const fileInputRef = useRef(null);
   const user = useSelector((s) => s.auth.user);
@@ -216,7 +218,13 @@ function ChatWindow({
           </Box>
         ) : (
           messages.map((message) => (
-            <MessageBubble key={message.id} message={message} onRetry={onRetryMessage} />
+            <MessageBubble
+              key={message.id}
+              message={message}
+              onRetry={onRetryMessage}
+              onEdit={onEditMessage}
+              onDelete={onDeleteMessage}
+            />
           ))
         )}
         <div ref={messagesEndRef} />
