@@ -1,4 +1,3 @@
-version: "3.8"
 
 services:
   chat-db:
@@ -7,14 +6,14 @@ services:
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: Yogesh@1234
-      POSTGRES_DB: chat_service
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+      POSTGRES_DB: "${POSTGRES_DB:-chat_service}"
     volumes:
       - chat_db_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -25,17 +24,20 @@ services:
     ports:
       - "5000:5000"
     environment:
-      DATABASE_URL: "postgresql://postgres:Yogesh%401234@chat-db:5432/chat_service"
-      BACKEND_URL: "http://3.110.56.109:5000"
-      CHAT_JWT_SECRET: "${CHAT_JWT_SECRET:-replace-with-a-long-stable-chat-secret}"
+      DATABASE_URL: "${DATABASE_URL:?DATABASE_URL is required}"
+      BACKEND_URL: "${BACKEND_URL:?BACKEND_URL is required}"
+      CHAT_FRONTEND_URL: "${CHAT_FRONTEND_URL:?CHAT_FRONTEND_URL is required}"
+      CHAT_JWT_SECRET: "${CHAT_JWT_SECRET:?CHAT_JWT_SECRET is required}"
+      MESSAGE_ENC_KEY: "${MESSAGE_ENC_KEY:?MESSAGE_ENC_KEY is required}"
+      PROJECT_REGISTRATION_SECRET: "${PROJECT_REGISTRATION_SECRET:?PROJECT_REGISTRATION_SECRET is required}"
       CORS_ORIGIN: "${CORS_ORIGIN:-*}"
+      PORT: "5000"
       AWS_REGION: "${AWS_REGION:-ap-south-1}"
       S3_BUCKET: "${S3_BUCKET:-}"
       AWS_S3_BUCKET: "${AWS_S3_BUCKET:-}"
       AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
       S3_SERVER_SIDE_ENCRYPTION: "${S3_SERVER_SIDE_ENCRYPTION:-AES256}"
-      PORT: "5000"
     volumes:
       - chat_uploads:/app/uploads
     depends_on:
@@ -46,12 +48,9 @@ services:
   chat-frontend:
     build:
       context: ./Frontend
-      args:
-        VITE_API_URL: "http://3.110.56.109:5000"
-        VITE_SOCKET_URL: "http://3.110.56.109:5000"
     container_name: chat-frontend
     ports:
-      - "3001:3001"
+      - "3001:80"
     depends_on:
       - chat-backend
     restart: unless-stopped
