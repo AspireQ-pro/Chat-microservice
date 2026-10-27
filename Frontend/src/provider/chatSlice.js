@@ -82,6 +82,7 @@ function normalizeMessage(m, currentUserId) {
     recipientCount,
     isDeleted: Boolean(m.isDeleted),
     editedAt: m.editedAt || null,
+    deliveredAt: m.deliveredAt || null,
     status: mine ? (isRead ? "read" : m.deliveredAt ? "delivered" : "sent") : undefined,
   };
 }
@@ -490,11 +491,26 @@ const chatSlice = createSlice({
             ? message.recipientCount
             : target.recipientCount ?? 1;
           const isRead = recipientCount > 0 && readBy.length >= recipientCount;
-          target.status = isRead ? "read" : message.deliveredAt ? "delivered" : "sent";
+
+          let newStatus = target.status;
+          if (isRead) {
+            newStatus = "read";
+          } else if (message.deliveredAt || target.status === "delivered") {
+            newStatus = "delivered";
+          } else if (target.status !== "read" && target.status !== "delivered") {
+            newStatus = "sent";
+          }
+
+          target.status = newStatus;
+          target.deliveredAt = message.deliveredAt || target.deliveredAt || null;
           target.readBy = readBy;
           target.recipientCount = recipientCount;
+          if (message.id) target.id = message.id;
+          if (message.createdAt) target.createdAt = message.createdAt;
         } else {
-          target.status = target.status === "read" ? "read" : "sent";
+          if (target.status !== "read" && target.status !== "delivered") {
+            target.status = "sent";
+          }
         }
       }
       state.outbox = state.outbox.filter((o) => o.clientId !== clientId);
@@ -542,7 +558,24 @@ const chatSlice = createSlice({
           (m) => m.clientId && m.clientId === normalized.clientId,
         );
         if (optIdx !== -1) {
-          list[optIdx] = { ...normalized, status: normalized.status || "sent" };
+          const existing = list[optIdx];
+          let finalStatus = normalized.status || "sent";
+          if (existing.status === "read" || finalStatus === "read") {
+            finalStatus = "read";
+          } else if (
+            existing.status === "delivered" ||
+            finalStatus === "delivered" ||
+            existing.deliveredAt ||
+            normalized.deliveredAt
+          ) {
+            finalStatus = "delivered";
+          }
+          list[optIdx] = {
+            ...existing,
+            ...normalized,
+            status: finalStatus,
+            deliveredAt: normalized.deliveredAt || existing.deliveredAt || null,
+          };
           state.outbox = state.outbox.filter(
             (o) => o.clientId !== normalized.clientId,
           );
@@ -559,14 +592,21 @@ const chatSlice = createSlice({
       }
     },
     messagesDelivered(state, { payload }) {
-      const { roomId } = payload;
-      const list = state.messages[roomId];
-      if (!list) return;
-      list.forEach((m) => {
-        if (m.mine && (m.status === "sending" || m.status === "sent")) {
-          m.status = "delivered";
-        }
-      });
+      const { roomId, deliveredAt } = payload || {};
+      const updateList = (list) => {
+        if (!list) return;
+        list.forEach((m) => {
+          if (m.mine && (m.status === "sending" || m.status === "sent")) {
+            m.status = "delivered";
+            if (deliveredAt) m.deliveredAt = deliveredAt;
+          }
+        });
+      };
+      if (roomId && state.messages[roomId]) {
+        updateList(state.messages[roomId]);
+      } else if (!roomId) {
+        Object.values(state.messages).forEach(updateList);
+      }
     },
     messagesRead(state, { payload }) {
       const { roomId, readerId, readAt } = payload;
