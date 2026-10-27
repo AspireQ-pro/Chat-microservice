@@ -68,13 +68,11 @@ function GroupInfoDialog({
 
   /* ── Derived data ── */
   const members = room?.members || []
-  // The creator is the member with the earliest joinedAt
-  const createdById = useMemo(() => {
-    if (!members.length) return null
-    return [...members]
-      .sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime())[0]?.userId || null
-  }, [members])
-  const isOwner = currentUserId && createdById && currentUserId === createdById
+  // Use the server-computed createdById from the room object (set by serializeRoomForUser)
+  // rather than re-sorting locally by joinedAt, which is fragile when timestamps are equal
+  // or when the members array is incomplete.
+  const createdById = room?.createdById || null
+  const isOwner = !!(currentUserId && createdById && currentUserId === createdById)
 
   /* ── View modes: 'info' | 'edit' | 'addMembers' ── */
   const [view, setView] = useState('info')
