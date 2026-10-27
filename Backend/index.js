@@ -32,6 +32,8 @@ const mediaUpload = createMediaUploadService({
   sendError: chatCore.sendError,
 });
 
+const onlineUsers = new Map();
+
 registerRoutes({
   app,
   prisma,
@@ -46,6 +48,7 @@ registerRoutes({
   crypto,
   path,
   io,
+  onlineUsers,
 });
 registerChatSocket({
   io,
@@ -60,6 +63,7 @@ registerChatSocket({
   encryptContent: chatCore.encryptContent,
   serializeRoomForUser: chatCore.serializeRoomForUser,
   sendError: chatCore.sendError,
+  onlineUsers,
 });
 
 const { PORT, KEEP_ALIVE_TIMEOUT_MS, HEADERS_TIMEOUT_MS } = config;

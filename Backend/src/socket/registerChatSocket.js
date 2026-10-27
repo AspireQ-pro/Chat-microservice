@@ -3,8 +3,8 @@ module.exports = function registerChatSocket(context) {
     io, prisma, jwt, CHAT_JWT_SECRET, resolveChatCapabilities,
     getProjectPermissions, mediaStorage, roomMediaStorageKey,
     decryptMessage, encryptContent, serializeRoomForUser, sendError,
+    onlineUsers = new Map(),
   } = context;
-const onlineUsers = new Map(); // socketId -> { userId, projectId }
 
 function broadcastOnlineUsers(projectId) {
   const userIds = [
@@ -63,6 +63,56 @@ io.on("connection", (socket) => {
       for (const m of memberships) socket.join(m.roomId);
     } catch (err) {
       console.error("auto re-join rooms error", err);
+    }
+  })();
+
+  // Deliver any pending messages waiting for this user across their rooms
+  (async () => {
+    try {
+      const now = new Date();
+      const memberships = await prisma.chatRoomMember.findMany({
+        where: {
+          userId: socket.userId,
+          room: { projectId: socket.projectId },
+        },
+        select: { roomId: true },
+      });
+      const roomIds = memberships.map((m) => m.roomId);
+      if (roomIds.length > 0) {
+        const undelivered = await prisma.message.findMany({
+          where: {
+            roomId: { in: roomIds },
+            senderId: { not: socket.userId },
+            deliveredAt: null,
+          },
+          select: { id: true, roomId: true, senderId: true },
+        });
+        if (undelivered.length > 0) {
+          await prisma.message.updateMany({
+            where: {
+              id: { in: undelivered.map((m) => m.id) },
+            },
+            data: { deliveredAt: now },
+          });
+          const touchedRooms = [...new Set(undelivered.map((m) => m.roomId))];
+          for (const rid of touchedRooms) {
+            io.to(rid).emit("messages_delivered", {
+              roomId: rid,
+              recipientId: socket.userId,
+              deliveredAt: now,
+            });
+          }
+          const senders = [...new Set(undelivered.map((m) => m.senderId))];
+          for (const sId of senders) {
+            io.to(`user:${sId}`).emit("messages_delivered", {
+              recipientId: socket.userId,
+              deliveredAt: now,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("auto delivery on connect error", err);
     }
   })();
 
@@ -292,6 +342,17 @@ io.on("connection", (socket) => {
           message: outgoing,
         });
 
+        if (someRecipientOnline && created.deliveredAt) {
+          io.to(roomId).emit("messages_delivered", {
+            roomId,
+            deliveredAt: created.deliveredAt,
+          });
+          io.to(`user:${senderId}`).emit("messages_delivered", {
+            roomId,
+            deliveredAt: created.deliveredAt,
+          });
+        }
+
         for (const m of members) {
           io.to(`user:${m.userId}`).emit("room_updated", {
             roomId,
@@ -351,6 +412,19 @@ io.on("connection", (socket) => {
         recipientId: socket.userId,
         deliveredAt: now,
       });
+      const roomMembers = await prisma.chatRoomMember.findMany({
+        where: { roomId },
+        select: { userId: true },
+      });
+      for (const m of roomMembers) {
+        if (m.userId !== socket.userId) {
+          io.to(`user:${m.userId}`).emit("messages_delivered", {
+            roomId,
+            recipientId: socket.userId,
+            deliveredAt: now,
+          });
+        }
+      }
     } catch (err) {
       console.error("message_delivered error", err);
     }

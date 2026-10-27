@@ -8,7 +8,7 @@ module.exports = function registerDirectRoutes(context) {
     encryptContent, decryptContent, decryptMessage, serializeRoomForUser,
     roomMediaStorageKey, resolveProject, authenticateChatJWT,
     parseFeatureFlag, resolveChatCapabilities, getProjectPermissions,
-    crypto, jwt, path, io,
+    crypto, jwt, path, io, onlineUsers = new Map(),
   } = context;
 app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
   const { allowDirectChat } = await getProjectPermissions(req.projectId, req);
@@ -180,6 +180,18 @@ app.post(
           directStatus: saved.room.directStatus,
           requestedById: saved.room.requestedById,
           message: outgoing,
+        });
+      }
+      if (saved.message.deliveredAt) {
+        io.to(saved.room.id).emit("messages_delivered", {
+          roomId: saved.room.id,
+          recipientId: userId2,
+          deliveredAt: saved.message.deliveredAt,
+        });
+        io.to(`user:${senderId}`).emit("messages_delivered", {
+          roomId: saved.room.id,
+          recipientId: userId2,
+          deliveredAt: saved.message.deliveredAt,
         });
       }
 

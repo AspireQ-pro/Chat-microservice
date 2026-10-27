@@ -297,6 +297,11 @@ export function useChatHandler() {
       dispatch(roomUpdated(p || {}));
       dispatch(fetchChatNotificationSummary());
 
+      // Acknowledge delivery if this room update includes a message from another user
+      if (p?.roomId && p?.message && myChatId && p.message.senderId !== myChatId) {
+        socket.emit("message_delivered", { roomId: p.roomId });
+      }
+
       // Only fetch rooms from server when the direct-chat request status
       // changes (pending → accepted), so the UI can show the new room.
       if (p?.directStatus === "pending" && p?.requestedById !== myChatId && selectedContactIdRef.current) {
