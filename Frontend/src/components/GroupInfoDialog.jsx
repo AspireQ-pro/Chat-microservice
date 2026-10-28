@@ -81,6 +81,7 @@ function GroupInfoDialog({
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editPhoto, setEditPhoto] = useState(null)   // { file, previewUrl }
+  const [savedAvatarPreview, setSavedAvatarPreview] = useState(null) // blob URL kept for info view
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const photoInputRef = useRef(null)
@@ -108,6 +109,7 @@ function GroupInfoDialog({
       setActionError('')
       setAddIds([])
       setAddSearch('')
+      setSavedAvatarPreview(null)
     }
   }, [open])
 
@@ -123,9 +125,15 @@ function GroupInfoDialog({
 
   // Cleanup object URLs
   useEffect(() => {
-    if (!open && editPhoto?.previewUrl) {
-      URL.revokeObjectURL(editPhoto.previewUrl)
-      setEditPhoto(null)
+    if (!open) {
+      if (editPhoto?.previewUrl) {
+        URL.revokeObjectURL(editPhoto.previewUrl)
+        setEditPhoto(null)
+      }
+      if (savedAvatarPreview) {
+        URL.revokeObjectURL(savedAvatarPreview)
+        setSavedAvatarPreview(null)
+      }
     }
   }, [open])
 
@@ -169,6 +177,7 @@ function GroupInfoDialog({
     setSaveError('')
     try {
       let avatarUrl = undefined
+      const previewUrl = editPhoto?.previewUrl || null
       if (editPhoto?.file) {
         const result = await dispatch(uploadGroupAvatar({ file: editPhoto.file })).unwrap()
         avatarUrl = result?.avatarUrl || undefined
@@ -177,6 +186,9 @@ function GroupInfoDialog({
       if (editDescription !== (room?.description || '')) payload.description = editDescription
       if (avatarUrl !== undefined) payload.avatarUrl = avatarUrl
       await dispatch(updateGroupInfo(payload)).unwrap()
+      // Keep the local blob preview so the Info view shows the new photo immediately,
+      // even if the server URL hasn't propagated to Redux yet or uses a different hostname.
+      if (previewUrl) setSavedAvatarPreview(previewUrl)
       setToast('Group info updated')
       setView('info')
     } catch (err) {
@@ -252,7 +264,7 @@ function GroupInfoDialog({
         >
           <Box sx={{ position: 'relative' }}>
             <AuthenticatedAvatar
-              src={room?.avatarUrl || undefined}
+              src={savedAvatarPreview || room?.avatarUrl || undefined}
               sx={{
                 width: 80,
                 height: 80,

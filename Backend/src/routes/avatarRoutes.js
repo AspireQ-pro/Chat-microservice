@@ -100,8 +100,7 @@ app.post(
       where: { id: req.userId },
       data: { avatarUrl: null, avatarStorageKey: payload.finalKey },
     });
-    const avatarUrl = await mediaStorage.createDownloadUrl(payload.finalKey) ||
-      `${BACKEND_URL}${API_BASE}/users/${req.userId}/avatar/${payload.filename}`;
+    const avatarUrl = `${BACKEND_URL}${API_BASE}/users/${req.userId}/avatar/${payload.filename}`;
     res.status(201).json({ avatarUrl });
   }),
 );
