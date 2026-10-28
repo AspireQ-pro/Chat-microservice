@@ -313,7 +313,7 @@ app.get(`${API_BASE}/users/me`, authenticateChatJWT, async (req, res) => {
     }
     const { avatarStorageKey, ...publicUser } = user;
     publicUser.avatarUrl = avatarStorageKey
-      ? await profileAvatarUrl(user.id, avatarStorageKey)
+      ? profileAvatarUrl(user.id, avatarStorageKey)
       : normalizeLegacyMediaUrl(user.avatarUrl);
     res.json(publicUser);
   } catch (err) {
@@ -336,12 +336,12 @@ app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
       where,
       orderBy: { name: "asc" },
     });
-    res.json(await Promise.all(users.map(async ({ avatarStorageKey, ...user }) => ({
+    res.json(users.map(({ avatarStorageKey, ...user }) => ({
       ...user,
       avatarUrl: avatarStorageKey
-        ? await profileAvatarUrl(user.id, avatarStorageKey)
+        ? profileAvatarUrl(user.id, avatarStorageKey)
         : normalizeLegacyMediaUrl(user.avatarUrl),
-    }))));
+    })));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

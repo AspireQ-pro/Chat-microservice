@@ -93,15 +93,15 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
     return `${BACKEND_URL}${API_BASE}/rooms/${roomId}/uploads/${path.basename(key)}`;
   }
 
-  async function profileAvatarUrl(userId, key) {
-    const signedUrl = await mediaStorage.createDownloadUrl(key);
-    if (signedUrl) return signedUrl;
+  function profileAvatarUrl(userId, key) {
+    // Always return the stable backend proxy URL. The proxy route calls
+    // sendStoredMedia which re-signs the S3 URL on every request, so the
+    // client never holds an expiring signed URL.
     return `${BACKEND_URL}${API_BASE}/users/${userId}/avatar/${path.basename(key)}`;
   }
 
-  async function groupAvatarUrl(key) {
-    const signedUrl = await mediaStorage.createDownloadUrl(key);
-    if (signedUrl) return signedUrl;
+  function groupAvatarUrl(key) {
+    // Always return the stable backend proxy URL for the same reason.
     return `${BACKEND_URL}${API_BASE}/uploads/${path.basename(key)}`;
   }
 
@@ -127,12 +127,12 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
     }
 
     const { avatarStorageKey, ...publicRoom } = room;
-    if (avatarStorageKey) publicRoom.avatarUrl = await groupAvatarUrl(avatarStorageKey);
+    if (avatarStorageKey) publicRoom.avatarUrl = groupAvatarUrl(avatarStorageKey);
     else publicRoom.avatarUrl = normalizeLegacyMediaUrl(publicRoom.avatarUrl);
     const members = await Promise.all((room.members || []).map(async (member) => {
       if (!member.user) return member;
       const { avatarStorageKey, ...publicUser } = member.user;
-      if (avatarStorageKey) publicUser.avatarUrl = await profileAvatarUrl(member.user.id, avatarStorageKey);
+      if (avatarStorageKey) publicUser.avatarUrl = profileAvatarUrl(member.user.id, avatarStorageKey);
       else publicUser.avatarUrl = normalizeLegacyMediaUrl(publicUser.avatarUrl);
       return { ...member, user: publicUser };
     }));
