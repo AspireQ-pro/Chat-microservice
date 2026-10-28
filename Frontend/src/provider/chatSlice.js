@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import { uploadWithPresignedForm } from "../features/media/upload";
+import { setMyAvatarUrl } from "./authSlice";
 
 const API =
   import.meta.env.VITE_API_URL ||
@@ -210,9 +211,26 @@ export const uploadGroupAvatar = createAsyncThunk(
   },
 );
 
+export const fetchSelfProfile = createAsyncThunk(
+  "chat/fetchSelfProfile",
+  async (_, { getState, dispatch, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/users/me`, {
+        headers: authHeaders(getState),
+      });
+      if (!res.ok) throw new Error("Failed to fetch profile");
+      const data = await res.json();
+      if (data.avatarUrl) dispatch(setMyAvatarUrl(data.avatarUrl));
+      return data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 export const uploadProfileAvatar = createAsyncThunk(
   "chat/uploadProfileAvatar",
-  async ({ file }, { getState, rejectWithValue }) => {
+  async ({ file }, { getState, dispatch, rejectWithValue }) => {
     try {
       if (!file) return rejectWithValue("File is required");
       const presigned = await uploadWithPresignedForm({
@@ -221,7 +239,10 @@ export const uploadProfileAvatar = createAsyncThunk(
         file,
         getState,
       });
-      if (presigned.mode !== "proxy") return presigned;
+      if (presigned.mode !== "proxy") {
+        if (presigned.avatarUrl) dispatch(setMyAvatarUrl(presigned.avatarUrl));
+        return presigned;
+      }
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch(`${API_BASE}/users/me/avatar`, {
@@ -231,6 +252,7 @@ export const uploadProfileAvatar = createAsyncThunk(
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to upload profile image");
+      if (data.avatarUrl) dispatch(setMyAvatarUrl(data.avatarUrl));
       return data;
     } catch (err) {
       return rejectWithValue(err.message);

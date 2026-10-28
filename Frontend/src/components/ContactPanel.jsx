@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Box,
   Typography,
@@ -21,7 +21,7 @@ import ContactItem from "./ContactItem";
 import GroupItem from "./GroupItem";
 import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
 import { useSelector, useDispatch } from "react-redux";
-import { uploadProfileAvatar } from "@/provider/chatSlice";
+import { uploadProfileAvatar, fetchSelfProfile } from "@/provider/chatSlice";
 
 function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, handleSelectRoom, onGroupInfoClick }) {
   return (
@@ -112,6 +112,7 @@ function ContactPanel({
 }) {
   const dispatch = useDispatch();
   const user = useSelector((s) => s.auth.user);
+  const myAvatarUrl = useSelector((s) => s.auth.myAvatarUrl);
   const allowGroupChat = Boolean(user?.allowGroupChat);
   const allowDirectChat = Boolean(user?.allowDirectChat);
   const showTabs = allowGroupChat && allowDirectChat;
@@ -119,11 +120,16 @@ function ContactPanel({
   const [activeTab, setActiveTab] = useState(0); // 0 = Direct Chats, 1 = Groups
 
   // ── Profile avatar upload state ──
-  const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarError, setAvatarError] = useState("");
   const [avatarSuccess, setAvatarSuccess] = useState(false);
   const avatarInputRef = useRef(null);
+
+  // Fetch own profile (including avatarUrl) on mount so the circle is always
+  // populated — even before the user has uploaded anything this session.
+  useEffect(() => {
+    dispatch(fetchSelfProfile());
+  }, [dispatch]);
 
   const handleAvatarChange = async (e) => {
     const file = e.target.files?.[0];
@@ -132,11 +138,8 @@ function ContactPanel({
     setUploadingAvatar(true);
     setAvatarError("");
     try {
-      const result = await dispatch(uploadProfileAvatar({ file })).unwrap();
-      if (result?.avatarUrl) {
-        setMyAvatarUrl(result.avatarUrl);
-        setAvatarSuccess(true);
-      }
+      await dispatch(uploadProfileAvatar({ file })).unwrap();
+      setAvatarSuccess(true);
     } catch (err) {
       setAvatarError(err?.message || "Failed to upload profile picture");
     } finally {

@@ -5,6 +5,7 @@ const authSlice = createSlice({
   initialState: {
     user: null,
     token: null,
+    myAvatarUrl: null,
     loading: false,
     error: null,
   },
@@ -18,11 +19,15 @@ const authSlice = createSlice({
     clearAuth(state) {
       state.user = null
       state.token = null
+      state.myAvatarUrl = null
       state.error = null
       state.loading = false
+    },
+    setMyAvatarUrl(state, { payload }) {
+      state.myAvatarUrl = payload || null
     },
   },
 })
 
-export const { setAuth, clearAuth } = authSlice.actions
+export const { setAuth, clearAuth, setMyAvatarUrl } = authSlice.actions
 export default authSlice.reducer

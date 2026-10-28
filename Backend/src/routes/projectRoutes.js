@@ -303,6 +303,24 @@ app.post(
 // 3. SEARCH USERS â€” Only within the same project
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+app.get(`${API_BASE}/users/me`, authenticateChatJWT, async (req, res) => {
+  try {
+    const user = await prisma.chatUser.findUnique({
+      where: { id: req.userId },
+    });
+    if (!user || user.projectId !== req.projectId) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    const { avatarStorageKey, ...publicUser } = user;
+    publicUser.avatarUrl = avatarStorageKey
+      ? await profileAvatarUrl(user.id, avatarStorageKey)
+      : normalizeLegacyMediaUrl(user.avatarUrl);
+    res.json(publicUser);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
   const { excludeId, q } = req.query;
   try {
