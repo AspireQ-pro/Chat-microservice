@@ -20,6 +20,7 @@ import {
   memberRemovedFromGroup,
   messageEdited,
   messageDeleted,
+  messageDeletedForMe,
   setConnected,
   setOnlineUsers,
   userOffline,
@@ -35,6 +36,11 @@ import {
   createGroup,
   markMessagesRead,
 } from "@/provider/chatSlice";
+
+const API =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "http://localhost:5000" : "");
+const API_BASE = `${API}/api`;
 
 export const ROLE_COLOR = {
   member: { bgcolor: "#e3f2fd", color: "#1565c0" },
@@ -343,6 +349,10 @@ export function useChatHandler() {
       if (!p?.messageId) return;
       dispatch(messageDeleted(p));
     };
+    const onMessageDeletedForMe = (p) => {
+      if (!p?.messageId) return;
+      dispatch(messageDeletedForMe(p));
+    };
 
     socket.on("connect", onConnectWithReconnect);
     socket.on("disconnect", onDisconnect);
@@ -358,6 +368,7 @@ export function useChatHandler() {
     socket.on("member_removed", onMemberRemoved);
     socket.on("message_edited", onMessageEdited);
     socket.on("message_deleted", onMessageDeleted);
+    socket.on("message_deleted_for_me", onMessageDeletedForMe);
 
     if (socket.connected) onConnectWithReconnect();
 
@@ -376,6 +387,7 @@ export function useChatHandler() {
       socket.off("member_removed", onMemberRemoved);
       socket.off("message_edited", onMessageEdited);
       socket.off("message_deleted", onMessageDeleted);
+      socket.off("message_deleted_for_me", onMessageDeletedForMe);
     };
   }, [dispatch, currentUser?.id, authToken]);
 
@@ -764,11 +776,35 @@ export function useChatHandler() {
     socket.emit("edit_message", { messageId, content: newContent });
   }, []);
 
-  const handleDeleteMessage = useCallback((messageId) => {
+  const handleDeleteMessage = useCallback(async (messageId, scope) => {
+    const deleteScope = scope === "me" ? "me" : "everyone";
+
+    // Prefer the socket for realtime sync across all participants.
     const socket = getSocket();
-    if (!socket?.connected) return;
-    socket.emit("delete_message", { messageId });
-  }, []);
+    if (socket?.connected) {
+      socket.emit("delete_message", { messageId, scope: deleteScope });
+      return;
+    }
+
+    // REST fallback when the socket is disconnected — still persists the
+    // deletion and broadcasts to any connected clients via the server-side
+    // socket.io instance.
+    try {
+      const res = await fetch(
+        `${API_BASE}/messages/${messageId}?scope=${deleteScope}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${authToken}` } },
+      );
+      const data = await res.json();
+      if (!res.ok) return;
+      if (data.scope === "me") {
+        dispatch(messageDeletedForMe({ messageId, roomId: data.roomId }));
+      } else {
+        dispatch(messageDeleted({ messageId, roomId: data.roomId }));
+      }
+    } catch (err) {
+      console.error("Failed to delete message:", err);
+    }
+  }, [dispatch, authToken]);
 
   return {
     input,

@@ -52,6 +52,10 @@ function ChatWindow({
   const user = useSelector((s) => s.auth.user);
   const allowGroupChat = Boolean(user?.allowGroupChat);
   const allowDirectChat = Boolean(user?.allowDirectChat);
+  // Admin role lets a user delete any message for everyone in both group and
+  // direct chats. The role comes from the JWT payload (and is refreshed via
+  // the profile endpoint).
+  const isAdmin = Boolean(user?.role) && user.role.toLowerCase().includes("admin");
 
   if (!activeContact) {
     return (
@@ -245,6 +249,7 @@ function ChatWindow({
               onRetry={onRetryMessage}
               onEdit={onEditMessage}
               onDelete={onDeleteMessage}
+              isAdmin={isAdmin}
             />
           ))
         )}

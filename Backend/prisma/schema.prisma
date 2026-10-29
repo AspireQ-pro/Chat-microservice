@@ -35,6 +35,7 @@ model ChatUser {
   project        Project           @relation(fields: [projectId], references: [id])
   rooms          ChatRoomMember[]
   messages       Message[]
+  deletedMessages MessageDeletion[]
 
   @@unique([projectId, externalUserId])
   @@index([projectId, name])
@@ -89,6 +90,19 @@ model Message {
 
   room       ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
   sender     ChatUser @relation(fields: [senderId], references: [id])
+  deletions  MessageDeletion[]
 
   @@index([roomId, createdAt])
+}
+
+model MessageDeletion {
+  messageId  String
+  userId     String
+  deletedAt  DateTime @default(now())
+
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user       ChatUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
 }

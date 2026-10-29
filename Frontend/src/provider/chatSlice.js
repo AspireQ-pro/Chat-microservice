@@ -1,6 +1,6 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import { uploadWithPresignedForm } from "../features/media/upload";
-import { setMyAvatarUrl } from "./authSlice";
+import { setMyAvatarUrl, setUserRole } from "./authSlice";
 
 const API =
   import.meta.env.VITE_API_URL ||
@@ -221,6 +221,10 @@ export const fetchSelfProfile = createAsyncThunk(
       if (!res.ok) throw new Error("Failed to fetch profile");
       const data = await res.json();
       if (data.avatarUrl) dispatch(setMyAvatarUrl(data.avatarUrl));
+      // Keep the auth user's role in sync with the server so admin
+      // permissions are accurate even for tokens issued before role was
+      // added to the JWT payload.
+      if (data.role !== undefined) dispatch(setUserRole(data.role));
       return data;
     } catch (err) {
       return rejectWithValue(err.message);
@@ -724,6 +728,16 @@ const chatSlice = createSlice({
         };
       }
     },
+    messageDeletedForMe(state, { payload }) {
+      // "Delete for me" — remove the message entirely from this user's view.
+      // Other participants still see it. Persisted server-side so it stays
+      // hidden across refreshes.
+      const { messageId, roomId } = payload || {};
+      if (!messageId || !roomId) return;
+      const list = state.messages[roomId];
+      if (!list) return;
+      state.messages[roomId] = list.filter((m) => m.id !== messageId);
+    },
     setConnected(state, { payload }) {
       state.connected = payload;
     },
@@ -937,6 +951,7 @@ export const {
   memberRemovedFromGroup,
   messageEdited,
   messageDeleted,
+  messageDeletedForMe,
   setConnected,
   setOnlineUsers,
   userOffline,

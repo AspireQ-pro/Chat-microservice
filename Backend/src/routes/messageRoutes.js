@@ -47,6 +47,10 @@ app.get(
       if (before && !isNaN(before.getTime())) {
         where.createdAt = { lt: before };
       }
+      // Exclude messages the caller has deleted for themselves ("delete for
+      // me"). These are tracked in the MessageDeletion join table so they stay
+      // hidden across page refreshes and reopens.
+      where.deletions = { none: { userId: req.userId } };
 
       // Fetch newest-first, one extra row to detect if more exist.
       const rows = await prisma.message.findMany({
@@ -273,6 +277,120 @@ app.get(
     }
   },
 );
+
+// â”€â”€â”€ Message deletion (REST fallback for when socket is offline) â”€â”€â”€â”€â”€
+// DELETE /api/messages/:messageId?scope=me|everyone
+//   scope=me      — hide the message from the caller's view only
+//   scope=everyone — soft-delete for all participants (owner or admin only)
+function isAdminRole(role) {
+  if (!role || typeof role !== "string") return false;
+  return role.toLowerCase().includes("admin");
+}
+
+async function recalcRoomPreview(roomId) {
+  const lastMsg = await prisma.message.findFirst({
+    where: { roomId, isDeleted: false },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true, content: true, messageType: true },
+  });
+  let preview = "";
+  let lastMessageAt = null;
+  if (lastMsg) {
+    if (lastMsg.messageType === "image") preview = "ðŸ“· Photo";
+    else if (lastMsg.messageType === "file") preview = "ðŸ“Ž File";
+    else preview = (decryptContent(lastMsg.content) || "").slice(0, 100);
+    lastMessageAt = lastMsg.createdAt;
+  }
+  await prisma.chatRoom.update({
+    where: { id: roomId },
+    data: { lastMessageAt, lastMessagePreview: encryptContent(preview) },
+  });
+  return { lastMessageAt, lastMessagePreview: preview };
+}
+
+app.delete(`${API_BASE}/messages/:messageId`, authenticateChatJWT, async (req, res) => {
+  const { messageId } = req.params;
+  const scope = req.query.scope === "me" ? "me" : "everyone";
+  try {
+    const message = await prisma.message.findFirst({
+      where: { id: messageId },
+      include: { room: true },
+    });
+    if (!message) return res.status(404).json({ error: "Message not found" });
+    if (message.room.projectId !== req.projectId)
+      return res.status(403).json({ error: "Unauthorized" });
+
+    const membership = await prisma.chatRoomMember.findUnique({
+      where: { roomId_userId: { roomId: message.roomId, userId: req.userId } },
+    });
+    if (!membership)
+      return res.status(403).json({ error: "Not a member of this room" });
+
+    if (scope === "me") {
+      await prisma.messageDeletion.upsert({
+        where: { messageId_userId: { messageId, userId: req.userId } },
+        create: { messageId, userId: req.userId },
+        update: {},
+      });
+      return res.json({ success: true, scope: "me", messageId, roomId: message.roomId });
+    }
+
+    // Delete for everyone
+    if (message.isDeleted) {
+      return res.json({ success: true, scope: "everyone", messageId, roomId: message.roomId });
+    }
+
+    const isOwner = message.senderId === req.userId;
+    let canDelete = isOwner;
+    if (!isOwner) {
+      const chatUser = await prisma.chatUser.findUnique({
+        where: { id: req.userId },
+        select: { role: true },
+      });
+      canDelete = isAdminRole(chatUser?.role);
+    }
+    if (!canDelete)
+      return res.status(403).json({ error: "You can only delete your own messages" });
+
+    await prisma.message.update({
+      where: { id: messageId },
+      data: {
+        isDeleted: true,
+        content: null,
+        fileUrl: null,
+        fileStorageKey: null,
+        fileType: null,
+      },
+    });
+
+    const roomUpdate = await recalcRoomPreview(message.roomId);
+
+    // Broadcast to all connected clients via socket so the UI updates in
+    // realtime even though the deletion was initiated via REST.
+    if (io) {
+      io.to(message.roomId).emit("message_deleted", {
+        messageId,
+        roomId: message.roomId,
+      });
+      const roomMembers = await prisma.chatRoomMember.findMany({
+        where: { roomId: message.roomId },
+        select: { userId: true },
+      });
+      for (const m of roomMembers) {
+        io.to(`user:${m.userId}`).emit("room_updated", {
+          roomId: message.roomId,
+          lastMessagePreview: roomUpdate.lastMessagePreview,
+          lastMessageAt: roomUpdate.lastMessageAt,
+        });
+      }
+    }
+
+    res.json({ success: true, scope: "everyone", messageId, roomId: message.roomId });
+  } catch (err) {
+    console.error("delete message error", err);
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // 6. SOCKET.IO â€” Multi-tenant real-time messaging

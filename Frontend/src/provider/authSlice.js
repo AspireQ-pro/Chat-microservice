@@ -26,8 +26,13 @@ const authSlice = createSlice({
     setMyAvatarUrl(state, { payload }) {
       state.myAvatarUrl = payload || null
     },
+    setUserRole(state, { payload }) {
+      if (state.user) {
+        state.user = { ...state.user, role: payload || null }
+      }
+    },
   },
 })
 
-export const { setAuth, clearAuth, setMyAvatarUrl } = authSlice.actions
+export const { setAuth, clearAuth, setMyAvatarUrl, setUserRole } = authSlice.actions
 export default authSlice.reducer
