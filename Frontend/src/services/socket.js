@@ -28,10 +28,18 @@ export function connectSocket(token) {
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
     timeout: 20000,
+    // Prefer WebSocket, fall back to polling if WS is blocked (e.g. some proxies).
+    transports: ['websocket', 'polling'],
   })
 
   socket.on('connect_error', (err) => {
     console.error('Socket connection error:', err.message)
+    // If the server explicitly rejects authentication (wrong secret, expired
+    // token), stop retrying — polling fallback in chat.js will take over.
+    if (err.message === 'Authentication required' || err.message === 'Invalid token') {
+      console.warn('Socket auth failed — real-time disabled; falling back to polling')
+      socket.io.opts.reconnection = false
+    }
   })
 
   return socket

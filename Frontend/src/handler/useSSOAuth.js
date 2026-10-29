@@ -67,7 +67,14 @@ export function useSSOAuth() {
     const tokenFromUrl = params.get("token");
 
     if (!tokenFromUrl) {
-      if (import.meta.env.DEV || import.meta.env.VITE_ALLOW_DEV_LOGIN === "true") {
+      // Dev-login fallback is only safe when running the local dev server
+      // (import.meta.env.DEV) and there is no real API URL configured.
+      // Never activate it in production — VITE_ALLOW_DEV_LOGIN in a
+      // production .env would otherwise bypass the real auth flow and
+      // prevent the socket from connecting (chat.js skips socket setup
+      // for "dev-mock-token").
+      const isLocalDev = import.meta.env.DEV && !import.meta.env.VITE_API_URL;
+      if (isLocalDev || (import.meta.env.DEV && import.meta.env.VITE_ALLOW_DEV_LOGIN === "true")) {
         dispatch(
           setAuth({
             token: "dev-mock-token",
