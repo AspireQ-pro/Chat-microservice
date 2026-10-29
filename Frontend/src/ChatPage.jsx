@@ -56,6 +56,7 @@ function ChatPage() {
     handleCreateGroup,
     handleEditMessage,
     handleDeleteMessage,
+    socketConnected,
   } = useChatHandler();
 
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
@@ -117,6 +118,7 @@ function ChatPage() {
       onViewMembers={() => openGroupInfo(activeRoom)}
       onEditMessage={handleEditMessage}
       onDeleteMessage={handleDeleteMessage}
+      socketConnected={socketConnected}
     />
   );
 

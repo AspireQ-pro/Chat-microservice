@@ -470,7 +470,7 @@ const chatSlice = createSlice({
     lastSeen: {},
     loading: false,
     error: null,
-    connected: false,
+    connected: null, // null = not yet attempted, false = disconnected, true = connected
   },
   reducers: {
     setActiveRoom(state, { payload }) {
@@ -766,7 +766,7 @@ const chatSlice = createSlice({
       };
       state.outbox = [];
       persistOutbox([]);
-      state.connected = false;
+      state.connected = null;
     },
   },
   extraReducers: (builder) => {

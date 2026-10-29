@@ -106,6 +106,7 @@ export function useChatHandler() {
   const pagination = useSelector((s) => s.chat.pagination);
   const outbox = useSelector((s) => s.chat.outbox);
   const lastSeen = useSelector((s) => s.chat.lastSeen);
+  const socketConnected = useSelector((s) => s.chat.connected);
 
   const chatUserId = authToken ? decodeChatUserId(authToken) : null;
 
@@ -137,10 +138,14 @@ export function useChatHandler() {
   const selectedContactIdRef = useRef(selectedContactId);
   const prevScrollHeightRef = useRef(0);
   const outboxRef = useRef(outbox);
+  const paginationRef = useRef(pagination);
 
   useEffect(() => {
     outboxRef.current = outbox;
   }, [outbox]);
+  useEffect(() => {
+    paginationRef.current = pagination;
+  }, [pagination]);
   useEffect(() => {
     activeRoomIdRef.current = activeRoomId;
   }, [activeRoomId]);
@@ -397,6 +402,48 @@ export function useChatHandler() {
     dispatch(fetchMessages(activeRoomId));
     dispatch(markMessagesRead({ roomId: activeRoomId }));
   }, [dispatch, activeRoomId]);
+
+  // ── Polling fallback when socket is disconnected ──
+  // Ensures messages and room list stay fresh even if the WebSocket
+  // connection fails (e.g. network issue, token mismatch, proxy blocking WS).
+  // A 6-second startup delay gives the socket time to establish before the
+  // first poll fires, avoiding redundant requests on a healthy connection.
+  useEffect(() => {
+    if (!currentUser?.id || !authToken || authToken === "dev-mock-token") return;
+    const POLL_INTERVAL = 5000;
+    const STARTUP_DELAY = 6000; // wait longer than one poll cycle before starting
+
+    const startPolling = () => {
+      const timer = setInterval(() => {
+        const socket = getSocket();
+        if (socket?.connected) return; // socket is healthy — skip this tick
+        dispatch(fetchMyRooms());
+        dispatch(fetchChatNotificationSummary());
+        // Only refresh messages if the user isn't browsing older history —
+        // fetchMessages replaces the current page and resets pagination,
+        // which would disrupt scroll position while reading past messages.
+        const rid = activeRoomIdRef.current;
+        if (rid) {
+          const page = paginationRef.current?.[rid];
+          const hasScrolledIntoHistory = page?.nextBefore != null;
+          if (!hasScrolledIntoHistory) {
+            dispatch(fetchMessages(rid));
+          }
+        }
+      }, POLL_INTERVAL);
+      return timer;
+    };
+
+    let timer;
+    const startup = setTimeout(() => {
+      timer = startPolling();
+    }, STARTUP_DELAY);
+
+    return () => {
+      clearTimeout(startup);
+      if (timer) clearInterval(timer);
+    };
+  }, [dispatch, currentUser?.id, authToken]);
 
   // ── Auto-scroll (not while loading older) ──
   useEffect(() => {
@@ -771,5 +818,6 @@ export function useChatHandler() {
     handleCreateGroup,
     handleEditMessage,
     handleDeleteMessage,
+    socketConnected,
   };
 }

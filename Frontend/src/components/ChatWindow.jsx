@@ -46,6 +46,7 @@ function ChatWindow({
   onViewMembers,
   onEditMessage,
   onDeleteMessage,
+  socketConnected,
 }) {
   const fileInputRef = useRef(null);
   const user = useSelector((s) => s.auth.user);
@@ -189,6 +190,26 @@ function ChatWindow({
 
 
       </Box>
+
+      {/* Reconnecting banner — shown when socket is disconnected (polling fallback active) */}
+      {socketConnected === false && (
+        <Box
+          sx={{
+            px: 2,
+            py: 0.75,
+            bgcolor: "#fff8e1",
+            borderBottom: "1px solid #ffe082",
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+          }}
+        >
+          <CircularProgress size={12} sx={{ color: "#f59e0b" }} />
+          <Typography variant="caption" sx={{ color: "#92400e", fontWeight: 500 }}>
+            Reconnecting… messages will update automatically
+          </Typography>
+        </Box>
+      )}
 
       <Box
         ref={messagesContainerRef}
