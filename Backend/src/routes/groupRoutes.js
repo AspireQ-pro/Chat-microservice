@@ -66,6 +66,7 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
         projectId: req.projectId,
         name,
         isGroup: true,
+        createdById: creatorId,
         avatarUrl: null,
         avatarStorageKey: safeAvatarStorageKey,
         description: safeDescription,
@@ -147,12 +148,11 @@ app.patch(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (
   const { roomId } = req.params;
   const room = await prisma.chatRoom.findFirst({
     where: { id: roomId, projectId: req.projectId, isGroup: true },
-    include: { members: { orderBy: { joinedAt: 'asc' }, select: { userId: true, joinedAt: true } } },
   });
   if (!room) return sendError(res, 404, 'Group not found');
 
-  // Only the first member (creator) may update group info
-  const creatorId = room.members[0]?.userId;
+  // Only the group creator (stored on the room) may update group info
+  const creatorId = room.createdById;
   if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can edit group info');
 
   const { name, description, avatarUrl } = req.body;
@@ -225,11 +225,11 @@ app.post(`${API_BASE}/rooms/:roomId/members`, authenticateChatJWT, asyncHandler(
   const { roomId } = req.params;
   const room = await prisma.chatRoom.findFirst({
     where: { id: roomId, projectId: req.projectId, isGroup: true },
-    include: { members: { orderBy: { joinedAt: 'asc' }, include: { user: true } } },
+    include: { members: { include: { user: true } } },
   });
   if (!room) return sendError(res, 404, 'Group not found');
 
-  const creatorId = room.members[0]?.userId;
+  const creatorId = room.createdById;
   if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can add members');
 
   const { memberIds } = req.body;
@@ -273,11 +273,11 @@ app.delete(`${API_BASE}/rooms/:roomId/members/:targetUserId`, authenticateChatJW
   const { roomId, targetUserId } = req.params;
   const room = await prisma.chatRoom.findFirst({
     where: { id: roomId, projectId: req.projectId, isGroup: true },
-    include: { members: { orderBy: { joinedAt: 'asc' }, select: { userId: true, joinedAt: true } } },
+    include: { members: { select: { userId: true } } },
   });
   if (!room) return sendError(res, 404, 'Group not found');
 
-  const creatorId = room.members[0]?.userId;
+  const creatorId = room.createdById;
   if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can remove members');
   if (targetUserId === req.userId) return sendError(res, 400, 'Use the leave endpoint to remove yourself');
 
