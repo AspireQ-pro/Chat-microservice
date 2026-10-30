@@ -32,6 +32,7 @@ services:
       PROJECT_REGISTRATION_SECRET: "${PROJECT_REGISTRATION_SECRET:?PROJECT_REGISTRATION_SECRET is required}"
       CORS_ORIGIN: "${CORS_ORIGIN:-*}"
       PORT: "5000"
+      RBAC_BACKEND_URL: "${RBAC_BACKEND_URL:-http://3.110.56.109:8080}"
       AWS_REGION: "${AWS_REGION:-ap-south-1}"
       S3_BUCKET: "${S3_BUCKET:-}"
       AWS_S3_BUCKET: "${AWS_S3_BUCKET:-}"
@@ -61,3 +62,4 @@ services:
 volumes:
   chat_db_data:
   chat_uploads:
+

@@ -1,3 +1,4 @@
+const { dispatchChatPushNotification } = require("../services/pushNotificationService");
 module.exports = function registerChatSocket(context) {
   const {
     io, prisma, jwt, CHAT_JWT_SECRET, resolveChatCapabilities,
@@ -255,7 +256,10 @@ io.on("connection", (socket) => {
 
         const members = await prisma.chatRoomMember.findMany({
           where: { roomId },
-          select: { userId: true },
+          select: {
+            userId: true,
+            user: { select: { externalUserId: true, name: true } },
+          },
         });
         if (!members.some((member) => member.userId === senderId)) {
           return socket.emit("error", { message: "Not a member of this room" });
@@ -398,6 +402,31 @@ io.on("connection", (socket) => {
             requestedById: room.requestedById,
             message: outgoing,
           });
+        }
+
+        // â”€â”€ Dispatch push notifications to recipients â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        try {
+          const recipientExternalIds = members
+            .filter((m) => m.userId !== senderId && m.user && m.user.externalUserId)
+            .map((m) => parseInt(m.user.externalUserId, 10))
+            .filter((id) => !isNaN(id) && id > 0);
+
+          if (recipientExternalIds.length > 0) {
+            const senderExternalId = sender.externalUserId ? parseInt(sender.externalUserId, 10) : null;
+            dispatchChatPushNotification({
+              senderUserId: !isNaN(senderExternalId) ? senderExternalId : null,
+              senderName: sender.name,
+              recipientUserIds: recipientExternalIds,
+              message: plainPreview,
+              roomId,
+              roomName: room.name || null,
+              isGroup: Boolean(room.isGroup),
+            }).catch((pushErr) => {
+              console.error("[registerChatSocket] Error dispatching push notification:", pushErr);
+            });
+          }
+        } catch (pushErr) {
+          console.error("[registerChatSocket] Error preparing push notification:", pushErr);
         }
       } catch (err) {
         console.error("Error saving message:", err);

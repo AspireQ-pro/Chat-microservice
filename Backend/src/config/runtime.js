@@ -67,6 +67,11 @@ const UPLOAD_TYPES = {
 };
 const KEEP_ALIVE_TIMEOUT_MS = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 5000);
 const HEADERS_TIMEOUT_MS = Number(process.env.HEADERS_TIMEOUT_MS || KEEP_ALIVE_TIMEOUT_MS + 1000);
+const RBAC_BACKEND_URL = (
+  process.env.RBAC_BACKEND_URL ||
+  process.env.SOCIETY_BACKEND_URL ||
+  "http://3.110.56.109:8080"
+).replace(/\/$/, "");
 
 module.exports = {
   isProduction,
@@ -76,6 +81,7 @@ module.exports = {
   corsOrigin,
   API_BASE,
   CHAT_FRONTEND_URL,
+  RBAC_BACKEND_URL,
   UPLOAD_TYPES,
   PORT: process.env.PORT || 5000,
   KEEP_ALIVE_TIMEOUT_MS,
