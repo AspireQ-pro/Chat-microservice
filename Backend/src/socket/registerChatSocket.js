@@ -2,9 +2,45 @@ module.exports = function registerChatSocket(context) {
   const {
     io, prisma, jwt, CHAT_JWT_SECRET, resolveChatCapabilities,
     getProjectPermissions, mediaStorage, roomMediaStorageKey,
-    decryptMessage, encryptContent, serializeRoomForUser, sendError,
+    decryptMessage, decryptContent, encryptContent, serializeRoomForUser, sendError,
     onlineUsers = new Map(),
   } = context;
+
+// Returns true when the role string indicates an admin-level user (e.g.
+// "admin", "Admin", "GroupAdmin", "group_admin"). This grants the ability to
+// delete any user's message for everyone in both group and direct chats.
+function isAdminRole(role) {
+  if (!role || typeof role !== "string") return false;
+  return role.toLowerCase().includes("admin");
+}
+
+// Recalculate a room's lastMessagePreview / lastMessageAt after a message is
+// deleted for everyone, so the room list never shows stale (deleted) content.
+// Returns the plaintext preview + timestamp so callers can broadcast a
+// realtime room_updated event.
+async function updateRoomLastMessage(roomId) {
+  const lastMsg = await prisma.message.findFirst({
+    where: { roomId, isDeleted: false },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true, content: true, messageType: true },
+  });
+  let preview = "";
+  let lastMessageAt = null;
+  if (lastMsg) {
+    if (lastMsg.messageType === "image") preview = "📷 Photo";
+    else if (lastMsg.messageType === "file") preview = "📎 File";
+    else preview = (decryptContent(lastMsg.content) || "").slice(0, 100);
+    lastMessageAt = lastMsg.createdAt;
+  }
+  await prisma.chatRoom.update({
+    where: { id: roomId },
+    data: {
+      lastMessageAt,
+      lastMessagePreview: encryptContent(preview),
+    },
+  });
+  return { lastMessageAt, lastMessagePreview: preview };
+}
 
 function broadcastOnlineUsers(projectId) {
   const userIds = [
@@ -501,25 +537,94 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("delete_message", async ({ messageId }) => {
+  socket.on("delete_message", async ({ messageId, scope }) => {
     if (!messageId) return;
+    const deleteScope = scope === "me" ? "me" : "everyone";
     try {
-      // Verify the message exists, belongs to this project, and was sent by this user.
+      // Look up the message without filtering by sender so admins can also
+      // delete other users' messages.
       const message = await prisma.message.findFirst({
-        where: { id: messageId, senderId: socket.userId },
+        where: { id: messageId },
         include: { room: true },
       });
-      if (!message) return socket.emit("error", { message: "Message not found or unauthorized" });
+      if (!message) return socket.emit("error", { message: "Message not found" });
       if (message.room.projectId !== socket.projectId)
         return socket.emit("error", { message: "Unauthorized" });
-      if (message.isDeleted) return; // already deleted — no-op
 
-      await prisma.message.update({
-        where: { id: messageId },
-        data: { isDeleted: true, content: null },
+      // The caller must be a member of the room to delete (either scope).
+      const membership = await prisma.chatRoomMember.findUnique({
+        where: { roomId_userId: { roomId: message.roomId, userId: socket.userId } },
       });
+      if (!membership)
+        return socket.emit("error", { message: "Not a member of this room" });
 
-      io.to(message.roomId).emit("message_deleted", { messageId, roomId: message.roomId });
+      if (deleteScope === "me") {
+        // ── Delete for me ──────────────────────────────────────────────
+        // Records a per-user deletion so the message is hidden from the
+        // caller's view only. Other participants still see it, and it stays
+        // hidden after refresh because the REST endpoint filters by this.
+        await prisma.messageDeletion.upsert({
+          where: { messageId_userId: { messageId, userId: socket.userId } },
+          create: { messageId, userId: socket.userId },
+          update: {},
+        });
+        // Notify only the caller — no broadcast to the room.
+        socket.emit("message_deleted_for_me", {
+          messageId,
+          roomId: message.roomId,
+        });
+      } else {
+        // ── Delete for everyone ────────────────────────────────────────
+        if (message.isDeleted) return; // already deleted — no-op
+
+        // Permission: the message sender OR any user with an admin role.
+        const isOwner = message.senderId === socket.userId;
+        let canDeleteForEveryone = isOwner;
+        if (!isOwner) {
+          const chatUser = await prisma.chatUser.findUnique({
+            where: { id: socket.userId },
+            select: { role: true },
+          });
+          canDeleteForEveryone = isAdminRole(chatUser?.role);
+        }
+        if (!canDeleteForEveryone) {
+          return socket.emit("error", {
+            message: "You can only delete your own messages",
+          });
+        }
+
+        await prisma.message.update({
+          where: { id: messageId },
+          data: {
+            isDeleted: true,
+            content: null,
+            fileUrl: null,
+            fileStorageKey: null,
+            fileType: null,
+          },
+        });
+
+        // Refresh the room preview so the sidebar doesn't show deleted content.
+        const roomUpdate = await updateRoomLastMessage(message.roomId);
+
+        io.to(message.roomId).emit("message_deleted", {
+          messageId,
+          roomId: message.roomId,
+        });
+
+        // Notify all members so their room-list preview updates in realtime.
+        const roomMembers = await prisma.chatRoomMember.findMany({
+          where: { roomId: message.roomId },
+          select: { userId: true },
+        });
+        for (const m of roomMembers) {
+          io.to(`user:${m.userId}`).emit("room_updated", {
+            roomId: message.roomId,
+            lastMessagePreview: roomUpdate.lastMessagePreview,
+            lastMessageAt: roomUpdate.lastMessageAt,
+          });
+        }
+      }
     } catch (err) {
       console.error("delete_message error", err);
       socket.emit("error", { message: "Failed to delete message" });

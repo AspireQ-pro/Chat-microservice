@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useSelector } from 'react-redux'
 import { Box, Typography, Button, IconButton, TextField, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material'
 import { API_BASE } from '../features/media/upload'
-import { Check, AccessTime, Edit, Delete, Close, Send } from '@mui/icons-material'
+import { Check, AccessTime, Edit, Delete, DeleteOutline, Close, Send } from '@mui/icons-material'
 
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
 function Ticks({ status }) {
@@ -38,7 +38,7 @@ function Ticks({ status }) {
 }
 
 /* ─── Main component ──────────────────────────────────────────────────────── */
-function MessageBubble({ message, onRetry, onEdit, onDelete }) {
+function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
   const failed    = message.mine && message.status === 'failed'
   const token     = useSelector((state) => state.auth.token)
 
@@ -78,20 +78,21 @@ function MessageBubble({ message, onRetry, onEdit, onDelete }) {
 
   const openMenu = useCallback((e) => {
     e.preventDefault()
-    // Only mine + not deleted + not optimistic
-    if (!message.mine || message.isDeleted || message.id?.startsWith('optimistic-')) return
+    // Any non-deleted, persisted message can be acted on (delete for me
+    // applies to others' messages too).
+    if (message.isDeleted || message.id?.startsWith('optimistic-')) return
     setMenuAnchor(e.currentTarget)
-  }, [message.mine, message.isDeleted, message.id])
+  }, [message.isDeleted, message.id])
 
   const closeMenu = () => setMenuAnchor(null)
 
   // Long-press for touch devices
   const onTouchStart = useCallback((e) => {
-    if (!message.mine || message.isDeleted || message.id?.startsWith('optimistic-')) return
+    if (message.isDeleted || message.id?.startsWith('optimistic-')) return
     longPressTimer.current = setTimeout(() => {
       setMenuAnchor(e.currentTarget ?? e.target)
     }, 500)
-  }, [message.mine, message.isDeleted, message.id])
+  }, [message.isDeleted, message.id])
 
   const onTouchEnd = useCallback(() => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current)
@@ -129,8 +130,12 @@ function MessageBubble({ message, onRetry, onEdit, onDelete }) {
   }
 
   /* ── delete ── */
-  const handleDelete = () => {
-    onDelete?.(message.id)
+  const handleDeleteForMe = () => {
+    onDelete?.(message.id, 'me')
+    closeMenu()
+  }
+  const handleDeleteForEveryone = () => {
+    onDelete?.(message.id, 'everyone')
     closeMenu()
   }
 
@@ -168,7 +173,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete }) {
           border: failed ? '1px solid #f5c6cb' : 'none',
           boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
           overflow: 'hidden',
-          cursor: message.mine && !message.isDeleted && !message.id?.startsWith('optimistic-') ? 'context-menu' : 'default',
+          cursor: !message.isDeleted && !message.id?.startsWith('optimistic-') ? 'context-menu' : 'default',
           userSelect: 'none',
         }}
       >
@@ -312,8 +317,8 @@ function MessageBubble({ message, onRetry, onEdit, onDelete }) {
           },
         }}
       >
-        {/* Edit — only for text messages */}
-        {isTextOnly && (
+        {/* Edit — only for own text messages */}
+        {isTextOnly && message.mine && (
           <MenuItem
             onClick={startEdit}
             sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#f0f5f4' } }}
@@ -327,19 +332,34 @@ function MessageBubble({ message, onRetry, onEdit, onDelete }) {
             />
           </MenuItem>
         )}
-        {/* Delete */}
+        {/* Delete for me — available for any message */}
         <MenuItem
-          onClick={handleDelete}
-          sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#feebee' } }}
+          onClick={handleDeleteForMe}
+          sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#f5f5f5' } }}
         >
           <ListItemIcon sx={{ minWidth: 'auto' }}>
-            <Delete sx={{ fontSize: 17, color: '#c62828' }} />
+            <DeleteOutline sx={{ fontSize: 17, color: '#757575' }} />
           </ListItemIcon>
           <ListItemText
-            primary="Delete for everyone"
-            primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500, color: '#c62828' }}
+            primary="Delete for me"
+            primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500, color: '#616161' }}
           />
         </MenuItem>
+        {/* Delete for everyone — own messages or admin */}
+        {(message.mine || isAdmin) && (
+          <MenuItem
+            onClick={handleDeleteForEveryone}
+            sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#feebee' } }}
+          >
+            <ListItemIcon sx={{ minWidth: 'auto' }}>
+              <Delete sx={{ fontSize: 17, color: '#c62828' }} />
+            </ListItemIcon>
+            <ListItemText
+              primary="Delete for everyone"
+              primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500, color: '#c62828' }}
+            />
+          </MenuItem>
+        )}
       </Menu>
     </Box>
   )

@@ -60,6 +60,7 @@ registerChatSocket({
   mediaStorage,
   roomMediaStorageKey: chatCore.roomMediaStorageKey,
   decryptMessage: chatCore.decryptMessage,
+  decryptContent: chatCore.decryptContent,
   encryptContent: chatCore.encryptContent,
   serializeRoomForUser: chatCore.serializeRoomForUser,
   sendError: chatCore.sendError,

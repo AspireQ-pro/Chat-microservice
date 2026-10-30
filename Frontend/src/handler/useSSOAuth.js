@@ -82,6 +82,7 @@ export function useSSOAuth() {
               id: import.meta.env.VITE_DEV_USER_ID || "dev-user-001",
               name: import.meta.env.VITE_DEV_USER_NAME || "Dev User",
               email: import.meta.env.VITE_DEV_USER_EMAIL || "dev@example.com",
+              role: import.meta.env.VITE_DEV_USER_ROLE || "member",
               plan: import.meta.env.VITE_DEV_PLAN || "custom",
               allowGroupChat: params.get("allowGroupChat") !== null
                 ? params.get("allowGroupChat") === "true"
@@ -114,6 +115,7 @@ export function useSSOAuth() {
           id: decoded?.userId,
           name: decoded?.name,
           email: decoded?.email,
+          role: decoded?.role || null,
           plan: decoded?.plan || "custom",
           allowGroupChat,
           allowDirectChat,
@@ -146,6 +148,7 @@ export function useSSOAuth() {
             id: refreshedUser.userId,
             name: refreshedUser.name,
             email: refreshedUser.email,
+            role: refreshedUser.role || null,
             plan: refreshedUser.plan || "custom",
             allowGroupChat,
             allowDirectChat,

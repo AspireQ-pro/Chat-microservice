@@ -67,6 +67,16 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
   async function decryptMessage(msg) {
     if (!msg) return msg;
     const { fileStorageKey: _fileStorageKey, ...publicMessage } = msg;
+    // Globally-deleted messages (delete for everyone) must never expose their
+    // original content or attachment — show only the "deleted" placeholder.
+    if (msg.isDeleted) {
+      return {
+        ...publicMessage,
+        content: null,
+        fileUrl: null,
+        fileType: null,
+      };
+    }
     return {
       ...publicMessage,
       fileUrl: msg.fileStorageKey
