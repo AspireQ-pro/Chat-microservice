@@ -215,7 +215,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "send_message",
-    async ({ roomId, content, fileUrl, fileType, clientId }) => {
+    async ({ roomId, content, fileUrl, fileType, fileName, fileSize, clientId }) => {
       // The sender is always the authenticated JWT user (never client-supplied).
       const senderId = socket.userId;
       if (!roomId || (!content && !fileUrl)) {
@@ -346,6 +346,8 @@ io.on("connection", (socket) => {
             fileUrl: fileStorageKey ? null : fileUrl,
             fileType,
             fileStorageKey,
+            fileName: fileUrl ? (String(fileName || "").slice(0, 255) || null) : null,
+            fileSize: fileUrl && Number.isFinite(Number(fileSize)) && fileSize > 0 ? Number(fileSize) : null,
             messageType,
             deliveredAt: someRecipientOnline ? new Date() : null,
           },

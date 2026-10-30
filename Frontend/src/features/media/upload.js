@@ -13,7 +13,7 @@ export async function uploadWithPresignedForm({ presignUrl, completeUrl, file, g
   const presignResponse = await fetch(presignUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify({ contentType: file.type, size: file.size }),
+    body: JSON.stringify({ contentType: file.type, size: file.size, fileName: file.name }),
   });
   const presignData = await presignResponse.json();
   if (!presignResponse.ok) throw new Error(presignData.error || "Unable to prepare upload");

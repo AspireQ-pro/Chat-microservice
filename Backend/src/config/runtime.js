@@ -59,11 +59,32 @@ if (isProduction) {
 }
 
 const UPLOAD_TYPES = {
+  // Images
   "image/jpeg": { extension: ".jpg", fileType: "image" },
   "image/png": { extension: ".png", fileType: "image" },
   "image/gif": { extension: ".gif", fileType: "image" },
   "image/webp": { extension: ".webp", fileType: "image" },
+  // PDF
   "application/pdf": { extension: ".pdf", fileType: "file" },
+  // Microsoft Office documents
+  "application/msword": { extension: ".doc", fileType: "file" },
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": { extension: ".docx", fileType: "file" },
+  "application/vnd.ms-excel": { extension: ".xls", fileType: "file" },
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": { extension: ".xlsx", fileType: "file" },
+  "application/vnd.ms-powerpoint": { extension: ".ppt", fileType: "file" },
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": { extension: ".pptx", fileType: "file" },
+  // Plain text and CSV
+  "text/plain": { extension: ".txt", fileType: "file" },
+  "text/csv": { extension: ".csv", fileType: "file" },
+  // Archives
+  "application/zip": { extension: ".zip", fileType: "file" },
+  // Audio
+  "audio/mpeg": { extension: ".mp3", fileType: "audio" },
+  "audio/ogg": { extension: ".ogg", fileType: "audio" },
+  "audio/wav": { extension: ".wav", fileType: "audio" },
+  // Video
+  "video/mp4": { extension: ".mp4", fileType: "video" },
+  "video/webm": { extension: ".webm", fileType: "video" },
 };
 const KEEP_ALIVE_TIMEOUT_MS = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 5000);
 const HEADERS_TIMEOUT_MS = Number(process.env.HEADERS_TIMEOUT_MS || KEEP_ALIVE_TIMEOUT_MS + 1000);

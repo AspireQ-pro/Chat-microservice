@@ -72,6 +72,8 @@ function normalizeMessage(m, currentUserId) {
     text: m.content || "",
     fileUrl: m.fileUrl || null,
     fileType: m.fileType || null,
+    fileName: m.fileName || null,
+    fileSize: m.fileSize || null,
     messageType: m.messageType || "text",
     time: new Date(m.createdAt || Date.now()).toLocaleTimeString([], {
       hour: "2-digit",
@@ -725,6 +727,8 @@ const chatSlice = createSlice({
           text: "",
           fileUrl: null,
           fileType: null,
+          fileName: null,
+          fileSize: null,
         };
       }
     },

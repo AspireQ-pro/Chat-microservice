@@ -641,7 +641,9 @@ export function useChatHandler() {
             text: "",
             fileUrl: uploaded.fileUrl,
             fileType: uploaded.fileType,
-            messageType: uploaded.fileType === "image" ? "image" : "file",
+            fileName: uploaded.fileName || file.name || null,
+            fileSize: uploaded.fileSize || file.size || null,
+            messageType: uploaded.fileType === "image" ? "image" : uploaded.fileType === "audio" ? "audio" : uploaded.fileType === "video" ? "video" : "file",
             time: new Date().toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",
@@ -656,6 +658,8 @@ export function useChatHandler() {
         roomId: activeRoomId,
         fileUrl: uploaded.fileUrl,
         fileType: uploaded.fileType,
+        fileName: uploaded.fileName || file.name || null,
+        fileSize: uploaded.fileSize || file.size || null,
         clientId,
       });
     } catch (err) {

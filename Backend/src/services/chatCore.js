@@ -75,6 +75,8 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
         content: null,
         fileUrl: null,
         fileType: null,
+        fileName: null,
+        fileSize: null,
       };
     }
     return {
@@ -167,7 +169,7 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
       const prefix = `${API_BASE}/rooms/${room.id}/uploads/`;
       if (url.origin !== new URL(BACKEND_URL).origin || !url.pathname.startsWith(prefix) || url.search || url.hash) return null;
       const filename = path.basename(url.pathname);
-      if (!/^[0-9a-f-]{36}\.(jpg|png|gif|webp|pdf)$/i.test(filename)) return null;
+      if (!/^[0-9a-f-]{36}\.(jpg|jpeg|png|gif|webp|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|mp3|ogg|wav|mp4|webm)$/i.test(filename)) return null;
       return mediaKey(projectId, room.isGroup ? "groups" : "direct", room.id, filename);
     } catch {
       return null;

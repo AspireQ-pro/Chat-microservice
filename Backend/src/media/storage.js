@@ -54,7 +54,7 @@ async function createUploadForm({ key, contentType, maxSize }) {
     Expires: 600,
     Fields: { "Content-Type": contentType },
     Conditions: [
-      ["content-length-range", 1, maxSize],
+      ["content-length-range", 1, maxSize || 25 * 1024 * 1024],
       ["eq", "$Content-Type", contentType],
     ],
   });
@@ -86,7 +86,7 @@ async function createDownloadUrl(key, expiresIn = 300) {
 
 async function finalizeUpload({ stagingKey, finalKey, contentType, maxSize, verifySignature }) {
   const head = await s3.send(new s3Commands.HeadObjectCommand({ Bucket: bucket, Key: stagingKey }));
-  if (!head.ContentLength || head.ContentLength > maxSize || head.ContentType !== contentType) {
+  if (!head.ContentLength || head.ContentLength > (maxSize || 25 * 1024 * 1024) || head.ContentType !== contentType) {
     await deleteObject(stagingKey);
     throw new Error("Uploaded file does not match its signed upload details");
   }
