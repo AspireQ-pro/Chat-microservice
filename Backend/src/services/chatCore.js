@@ -118,11 +118,16 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
         })
       : 0;
 
-    let createdById = null;
-    if (room.isGroup && room.members?.length) {
-      const sorted = [...room.members].sort(
-        (a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime(),
-      );
+    let createdById = room.createdById || null;
+    if (room.isGroup && !createdById && room.members?.length) {
+      // Fallback for legacy rooms that haven't been backfilled yet: pick the
+      // earliest joiner, breaking ties deterministically by userId so the UI
+      // badge and the backend authorization checks always agree.
+      const sorted = [...room.members].sort((a, b) => {
+        const dt = new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
+        if (dt !== 0) return dt;
+        return a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0;
+      });
       createdById = sorted[0]?.userId || null;
     }
 

@@ -47,6 +47,7 @@ model ChatRoom {
   isGroup           Boolean  @default(false)
   directStatus      String   @default("accepted")
   requestedById     String?
+  createdById       String?
   lastMessageAt     DateTime?
   lastMessagePreview String?
   avatarUrl         String?
