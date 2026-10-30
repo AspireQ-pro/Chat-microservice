@@ -37,7 +37,8 @@ app.post(
     res.status(201).json({
       fileUrl: `${BACKEND_URL}${API_BASE}/rooms/${req.mediaRoom.id}/uploads/${payload.filename}`,
       fileType: payload.fileType,
-      size: saved.size,
+      fileName: saved.fileName || payload.filename,
+      fileSize: saved.size,
     });
   }),
 );
@@ -74,10 +75,15 @@ app.post(
     const category = req.room.isGroup ? "groups" : "direct";
     const key = mediaKey(req.projectId, category, req.room.id, filename);
     await mediaStorage.putObject({ key, body: req.file.buffer, contentType: req.file.mimetype });
+    // Preserve original filename (sanitized) from the multipart upload field
+    const originalName = req.file.originalname
+      ? path.basename(req.file.originalname).replace(/[^\w.\-]/g, "_").slice(0, 255)
+      : filename;
     res.status(201).json({
       fileUrl: `${BACKEND_URL}${API_BASE}/rooms/${req.params.roomId}/uploads/${filename}`,
       fileType: allowedType.fileType,
-      size: req.file.size,
+      fileName: originalName,
+      fileSize: req.file.size,
     });
   }),
 );
@@ -87,9 +93,10 @@ app.get(
   authenticateChatJWT,
   asyncHandler(async (req, res) => {
     const { roomId, filename } = req.params;
+    // Disallow path traversal and only allow UUID-named files with known extensions
     if (
       path.basename(filename) !== filename ||
-      !/^[0-9a-f-]{36}\.(jpg|png|gif|webp|pdf)$/i.test(filename)
+      !/^[0-9a-f-]{36}\.(jpg|jpeg|png|gif|webp|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|mp3|ogg|wav|mp4|webm)$/i.test(filename)
     ) {
       return res.status(404).json({ error: "Attachment not found" });
     }
@@ -112,12 +119,24 @@ app.get(
           { fileUrl: { endsWith: `/uploads/${filename}` } },
         ],
       },
-      select: { id: true, fileStorageKey: true },
+      select: { id: true, fileStorageKey: true, fileName: true, fileType: true },
     });
     if (!referenced) return res.status(404).json({ error: "Attachment not found" });
 
     const category = room.isGroup ? "groups" : "direct";
     const key = referenced.fileStorageKey || legacyMediaKey(req.projectId, category, roomId, filename);
+
+    // Set Content-Disposition: images open inline; everything else triggers download
+    const downloadName = referenced.fileName || filename;
+    // Sanitize for use in a header value
+    const safeName = downloadName.replace(/[^\w.\-]/g, "_").replace(/^_+|_+$/g, "") || filename;
+    const encodedName = encodeURIComponent(safeName);
+    const isImage = referenced.fileType === "image" || /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
+    const disposition = isImage
+      ? `inline; filename="${safeName}"; filename*=UTF-8''${encodedName}`
+      : `attachment; filename="${safeName}"; filename*=UTF-8''${encodedName}`;
+    res.setHeader("Content-Disposition", disposition);
+
     await sendStoredMedia(req, res, key);
   }),
 );
