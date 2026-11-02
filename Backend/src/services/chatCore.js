@@ -82,7 +82,7 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
     return {
       ...publicMessage,
       fileUrl: msg.fileStorageKey
-        ? await attachmentUrl(msg.roomId, msg.fileStorageKey)
+        ? attachmentUrl(msg.roomId, msg.fileStorageKey)
         : normalizeLegacyMediaUrl(msg.fileUrl),
       content: decryptContent(msg.content),
     };
@@ -99,9 +99,10 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
     return value;
   }
 
-  async function attachmentUrl(roomId, key) {
-    const signedUrl = await mediaStorage.createDownloadUrl(key);
-    if (signedUrl) return signedUrl;
+  function attachmentUrl(roomId, key) {
+    // Always return the stable backend proxy URL. The proxy route calls
+    // sendStoredMedia which re-signs the S3/CloudFront URL on every request,
+    // so the client never holds an expiring signed URL.
     return `${BACKEND_URL}${API_BASE}/rooms/${roomId}/uploads/${path.basename(key)}`;
   }
 

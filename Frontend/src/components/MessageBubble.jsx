@@ -77,6 +77,27 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
   const [attachmentLoading, setAttachmentLoading] = useState(false)
   const [attachmentError, setAttachmentError]   = useState(false)
 
+  // Build the stable backend proxy URL for a message attachment.
+  // The backend always accepts this URL (it re-signs S3 on each request),
+  // so we use it as a fallback when a short-lived presigned URL has expired.
+  const proxyFallbackUrl = useCallback(() => {
+    if (!message.fileUrl || !message.roomId) return null
+    try {
+      const parsed = new URL(message.fileUrl, window.location.href)
+      // If it already looks like a backend proxy URL (same origin, /uploads/ path), use it as-is
+      const backendOrigin = new URL(API_BASE, window.location.href).origin
+      if (parsed.origin === backendOrigin && parsed.pathname.includes('/uploads/')) {
+        return message.fileUrl
+      }
+      // For S3/CloudFront presigned URLs, reconstruct the proxy URL from the filename
+      const filename = parsed.pathname.split('/').pop()
+      if (!filename) return null
+      return `${API_BASE}/rooms/${message.roomId}/uploads/${filename}`
+    } catch {
+      return null
+    }
+  }, [message.fileUrl, message.roomId])
+
   const loadAttachment = useCallback(() => {
     if (!message.fileUrl || !token || message.isDeleted) {
       setAttachmentUrl(null)
@@ -86,20 +107,37 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     setAttachmentLoading(true)
     setAttachmentError(false)
     let objectUrl = null
-    let headers = {}
-    try {
-      // S3 presigned URLs authenticate via query signature — only add JWT for backend proxy URLs
-      if (new URL(message.fileUrl, window.location.href).origin === new URL(API_BASE, window.location.href).origin) {
+
+    const fetchUrl = (url) => {
+      let headers = {}
+      try {
+        // S3 presigned URLs authenticate via query signature — only add JWT for backend proxy URLs
+        if (new URL(url, window.location.href).origin === new URL(API_BASE, window.location.href).origin) {
+          headers = { Authorization: `Bearer ${token}` }
+        }
+      } catch {
         headers = { Authorization: `Bearer ${token}` }
       }
-    } catch {
-      headers = { Authorization: `Bearer ${token}` }
+      return fetch(url, { headers, signal: controller.signal })
     }
-    fetch(message.fileUrl, { headers, signal: controller.signal })
+
+    fetchUrl(message.fileUrl)
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.blob()
+        // Presigned URL may have expired (S3 returns 403/400). Fall back to the
+        // stable backend proxy URL which re-signs on the server side each time.
+        if (!r.ok) {
+          const fallback = proxyFallbackUrl()
+          if (fallback && fallback !== message.fileUrl) {
+            return fetchUrl(fallback).then((r2) => {
+              if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
+              return r2
+            })
+          }
+          throw new Error(`HTTP ${r.status}`)
+        }
+        return r
       })
+      .then((r) => r.blob())
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob)
         if (!controller.signal.aborted) {
