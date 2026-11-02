@@ -3,7 +3,7 @@ import {
   Box, Typography, Avatar, TextField, Button,
   CircularProgress, Alert, Dialog, Slide,
   IconButton, InputAdornment, Chip,
-  Snackbar,
+  Snackbar, Switch, FormControlLabel,
 } from '@mui/material'
 import {
   ArrowBackIos, Close, Search, Check,
@@ -58,6 +58,7 @@ function CreateGroupDialog({
   const [step, setStep] = useState(1)          // 1 = select members, 2 = group details
   const [memberSearch, setMemberSearch] = useState('')
   const [description, setDescription] = useState('')
+  const [adminOnlyMessages, setAdminOnlyMessages] = useState(false)
   const [groupPhoto, setGroupPhoto] = useState(null)   // { file, previewUrl }
   const photoInputRef = useRef(null)
 
@@ -96,6 +97,7 @@ function CreateGroupDialog({
       setStep(1)
       setMemberSearch('')
       setDescription('')
+      setAdminOnlyMessages(false)
       setGroupPhoto(null)
     }
   }, [open])
@@ -133,6 +135,7 @@ function CreateGroupDialog({
       memberIds: groupMemberIds,
       avatarUrl: uploadedAvatarUrl,
       description: description.trim() || undefined,
+      adminOnlyMessages,
     })
   }
 
@@ -457,6 +460,39 @@ function CreateGroupDialog({
             },
           }}
         />
+
+        {/* Admin-only messaging toggle */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            bgcolor: '#F5F7F6',
+            borderRadius: '12px',
+            px: 2,
+            py: 1.5,
+            mb: 2.5,
+          }}
+        >
+          <Box sx={{ flex: 1, mr: 1 }}>
+            <Typography variant="body2" fontWeight={600} color="#172A26">
+              Admin only can message
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Only the group admin will be able to send messages. Others can read but not reply.
+            </Typography>
+          </Box>
+          <Switch
+            checked={adminOnlyMessages}
+            onChange={(e) => setAdminOnlyMessages(e.target.checked)}
+            size="small"
+            sx={{
+              mt: 0.25,
+              '& .MuiSwitch-switchBase.Mui-checked': { color: '#2D4A44' },
+              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: '#2D4A44' },
+            }}
+          />
+        </Box>
 
         {/* Members summary */}
         <Box
