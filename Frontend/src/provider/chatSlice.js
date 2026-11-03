@@ -442,6 +442,23 @@ export const removeGroupMember = createAsyncThunk(
   },
 );
 
+export const deleteGroup = createAsyncThunk(
+  'chat/deleteGroup',
+  async (roomId, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/rooms/${roomId}`, {
+        method: 'DELETE',
+        headers: authHeaders(getState),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete group');
+      return { roomId };
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 export const markMessagesRead = createAsyncThunk(
   "chat/markMessagesRead",
   async ({ roomId }, { getState }) => {
@@ -934,6 +951,12 @@ const chatSlice = createSlice({
           (m) => m.userId !== userId
         );
       }
+    });
+
+    builder.addCase(deleteGroup.fulfilled, (state, { payload }) => {
+      const { roomId } = payload;
+      state.rooms = state.rooms.filter((r) => r.id !== roomId);
+      if (state.activeRoomId === roomId) state.activeRoomId = null;
     });
   },
 });

@@ -8,7 +8,7 @@ import {
 import {
   ArrowBackIos, Close, Search, Check,
   CameraAlt, Edit, PersonAdd, PersonRemove, ExitToApp,
-  People,
+  People, DeleteForever,
 } from '@mui/icons-material'
 import { useTheme, useMediaQuery } from '@mui/material'
 import { useDispatch } from 'react-redux'
@@ -19,6 +19,7 @@ import {
   removeGroupMember,
   leaveGroup,
   uploadGroupAvatar,
+  deleteGroup,
 } from '@/provider/chatSlice'
 
 /* ─── helpers ─────────────────────────────────── */
@@ -49,18 +50,13 @@ const SlideUp = React.forwardRef(function SlideUp(props, ref) {
 
 /* ════════════════════════════════════════════════
    GroupInfoDialog
-   Mimics WhatsApp-style group info:
-     - View / edit group name, description, avatar (owner only)
-     - Member list with remove (owner only)
-     - Add members panel (owner only)
-     - Leave group (non-owner)
 ════════════════════════════════════════════════ */
 function GroupInfoDialog({
   open,
   onClose,
   room,
   currentUserId,
-  contacts,         // all project contacts to pick from when adding
+  contacts,
 }) {
   const dispatch = useDispatch()
   const theme = useTheme()
@@ -68,9 +64,6 @@ function GroupInfoDialog({
 
   /* ── Derived data ── */
   const members = room?.members || []
-  // Use the server-computed createdById from the room object (set by serializeRoomForUser)
-  // rather than re-sorting locally by joinedAt, which is fragile when timestamps are equal
-  // or when the members array is incomplete.
   const createdById = room?.createdById || null
   const isOwner = !!(currentUserId && createdById && currentUserId === createdById)
 
@@ -80,8 +73,8 @@ function GroupInfoDialog({
   /* ── Edit state ── */
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
-  const [editPhoto, setEditPhoto] = useState(null)   // { file, previewUrl }
-  const [savedAvatarPreview, setSavedAvatarPreview] = useState(null) // blob URL kept for info view
+  const [editPhoto, setEditPhoto] = useState(null)
+  const [savedAvatarPreview, setSavedAvatarPreview] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const photoInputRef = useRef(null)
@@ -92,10 +85,14 @@ function GroupInfoDialog({
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState('')
 
-  /* ── Remove / leave state ── */
+  /* ── Remove / leave / delete state ── */
   const [removingId, setRemovingId] = useState(null)
   const [leaving, setLeaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [actionError, setActionError] = useState('')
+
+  /* ── Min-member warning (shown when removal would leave < 2 non-admin members) ── */
+  const [minMemberWarning, setMinMemberWarning] = useState(false)
 
   /* ── Toast ── */
   const [toast, setToast] = useState('')
@@ -107,6 +104,7 @@ function GroupInfoDialog({
       setSaveError('')
       setAddError('')
       setActionError('')
+      setMinMemberWarning(false)
       setAddIds([])
       setAddSearch('')
       setSavedAvatarPreview(null)
@@ -186,8 +184,6 @@ function GroupInfoDialog({
       if (editDescription !== (room?.description || '')) payload.description = editDescription
       if (avatarUrl !== undefined) payload.avatarUrl = avatarUrl
       await dispatch(updateGroupInfo(payload)).unwrap()
-      // Keep the local blob preview so the Info view shows the new photo immediately,
-      // even if the server URL hasn't propagated to Redux yet or uses a different hostname.
       if (previewUrl) setSavedAvatarPreview(previewUrl)
       setToast('Group info updated')
       setView('info')
@@ -216,8 +212,19 @@ function GroupInfoDialog({
   }
 
   const handleRemoveMember = async (userId) => {
+    // Count non-admin members that would remain after removal.
+    // The admin (createdById) is never counted toward the 2-member minimum.
+    const nonAdminAfterRemoval = members.filter(
+      (m) => m.userId !== createdById && m.userId !== userId,
+    ).length
+    if (nonAdminAfterRemoval < 2) {
+      setMinMemberWarning(true)
+      return
+    }
+
     setRemovingId(userId)
     setActionError('')
+    setMinMemberWarning(false)
     try {
       await dispatch(removeGroupMember({ roomId: room.id, userId })).unwrap()
       setToast('Member removed')
@@ -225,6 +232,18 @@ function GroupInfoDialog({
       setActionError(typeof err === 'string' ? err : err?.message || 'Failed to remove member')
     } finally {
       setRemovingId(null)
+    }
+  }
+
+  const handleDeleteGroup = async () => {
+    setDeleting(true)
+    setActionError('')
+    try {
+      await dispatch(deleteGroup(room.id)).unwrap()
+      onClose()
+    } catch (err) {
+      setActionError(typeof err === 'string' ? err : err?.message || 'Failed to delete group')
+      setDeleting(false)
     }
   }
 
@@ -354,6 +373,42 @@ function GroupInfoDialog({
               </Tooltip>
             )}
           </Box>
+
+          {/* Min-member warning — shown when removal would violate the 2-non-admin rule */}
+          {minMemberWarning && (
+            <Alert
+              severity="warning"
+              sx={{ mb: 1.5, borderRadius: 2, py: 0.75, fontSize: '0.8rem', alignItems: 'flex-start' }}
+              onClose={() => setMinMemberWarning(false)}
+            >
+              <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5, fontSize: '0.8rem' }}>
+                A group must have at least 2 members besides the admin.
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Add more members or delete the group.
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                startIcon={deleting ? <CircularProgress size={12} color="inherit" /> : <DeleteForever sx={{ fontSize: '1rem !important' }} />}
+                disabled={deleting}
+                onClick={handleDeleteGroup}
+                sx={{
+                  textTransform: 'none',
+                  fontSize: '0.75rem',
+                  py: 0.25,
+                  px: 1,
+                  borderRadius: 1.5,
+                  borderColor: '#ef9a9a',
+                  color: '#c62828',
+                  '&:hover': { bgcolor: '#FEEBEE', borderColor: '#c62828' },
+                }}
+              >
+                {deleting ? 'Deleting…' : 'Delete group'}
+              </Button>
+            </Alert>
+          )}
 
           {actionError && (
             <Alert severity="error" sx={{ mb: 1.5, borderRadius: 2, py: 0.5, fontSize: '0.8rem' }}>
