@@ -111,7 +111,7 @@ app.patch(
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const handleSyncUser = asyncHandler(async (req, res) => {
-  const { id, name, email, role } = req.body || {};
+  const { id, name, email, role, avatarUrl } = req.body || {};
   if (!id || !name) {
     return sendError(res, 400, "id and name are required");
   }
@@ -121,6 +121,13 @@ const handleSyncUser = asyncHandler(async (req, res) => {
       ? String(email).trim()
       : `${String(id)}@noemail.local`;
   const safeRole = role && String(role).trim() ? String(role).trim() : null;
+  // avatarUrl is the permanent profile photo URL from Society Management (source of truth).
+  // Only update when explicitly sent — undefined means the RBAC version doesn't support it yet,
+  // so we leave the existing avatar untouched rather than wiping it.
+  const safeAvatarUrl =
+    typeof avatarUrl === "string" && avatarUrl.trim()
+      ? avatarUrl.trim()
+      : undefined;
 
   let chatUser = await prisma.chatUser.findUnique({
     where: {
@@ -139,12 +146,22 @@ const handleSyncUser = asyncHandler(async (req, res) => {
         name: String(name),
         email: safeEmail,
         role: safeRole,
+        // Include avatarUrl only when Society Management sends it.
+        // Clear avatarStorageKey so the externally-managed photo takes precedence.
+        ...(safeAvatarUrl !== undefined ? { avatarUrl: safeAvatarUrl, avatarStorageKey: null } : {}),
       },
     });
   } else {
     chatUser = await prisma.chatUser.update({
       where: { id: chatUser.id },
-      data: { name: String(name), email: safeEmail, role: safeRole },
+      data: {
+        name: String(name),
+        email: safeEmail,
+        role: safeRole,
+        // When Society Management provides an avatarUrl, it is the source of truth —
+        // clear any previously chat-uploaded avatar (avatarStorageKey).
+        ...(safeAvatarUrl !== undefined ? { avatarUrl: safeAvatarUrl, avatarStorageKey: null } : {}),
+      },
     });
   }
 
