@@ -266,21 +266,25 @@ io.on("connection", (socket) => {
         }
 
         // If the group is restricted to admin-only messaging, reject non-admins.
+        // Allow both global admins (via role) and the group creator.
         if (room.isGroup && room.adminOnlyMessages) {
-          const chatUser = await prisma.chatUser.findFirst({
-            where: { id: senderId, projectId: socket.projectId },
-            select: { role: true },
-          });
-          if (!isAdminRole(chatUser?.role)) {
-            socket.emit("message_ack", {
-              clientId: clientId || null,
-              status: "failed",
-              error: "Only admins can send messages in this group",
+          const isCreator = room.createdById === senderId;
+          if (!isCreator) {
+            const chatUser = await prisma.chatUser.findFirst({
+              where: { id: senderId, projectId: socket.projectId },
+              select: { role: true },
             });
-            return socket.emit("error", {
-              message: "Only admins can send messages in this group",
-              clientId: clientId || null,
-            });
+            if (!isAdminRole(chatUser?.role)) {
+              socket.emit("message_ack", {
+                clientId: clientId || null,
+                status: "failed",
+                error: "Only admins can send messages in this group",
+              });
+              return socket.emit("error", {
+                message: "Only admins can send messages in this group",
+                clientId: clientId || null,
+              });
+            }
           }
         }
 
