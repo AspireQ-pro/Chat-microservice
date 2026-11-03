@@ -744,6 +744,7 @@ export function useChatHandler() {
       const memberIds = payload?.memberIds || groupMemberIds;
       const avatarUrl = payload?.avatarUrl || null;
       const description = payload?.description || null;
+      const adminOnlyMessages = payload?.adminOnlyMessages === true;
 
       if (!name) {
         setGroupError("Group name is required.");
@@ -757,7 +758,7 @@ export function useChatHandler() {
       setGroupError("");
       try {
         await dispatch(
-          createGroup({ name, memberIds, avatarUrl, description }),
+          createGroup({ name, memberIds, avatarUrl, description, adminOnlyMessages }),
         ).unwrap();
         closeGroupDialog();
         if (isMobile) setShowPanel(false);

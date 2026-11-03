@@ -16,7 +16,7 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
     return sendError(res, 403, "Group chat is not enabled for this project");
   }
 
-  const { name, memberIds, avatarUrl, description } = req.body;
+  const { name, memberIds, avatarUrl, description, adminOnlyMessages } = req.body;
   const creatorId = req.userId;
   if (!name || !memberIds?.length) {
     return res
@@ -67,6 +67,7 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
         name,
         isGroup: true,
         createdById: creatorId,
+        adminOnlyMessages: adminOnlyMessages === true,
         avatarUrl: null,
         avatarStorageKey: safeAvatarStorageKey,
         description: safeDescription,

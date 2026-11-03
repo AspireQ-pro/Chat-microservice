@@ -46,6 +46,7 @@ model ChatRoom {
   projectId         String
   name              String?
   isGroup           Boolean  @default(false)
+  adminOnlyMessages Boolean  @default(false)
   directStatus      String   @default("accepted")
   requestedById     String?
   createdById       String?

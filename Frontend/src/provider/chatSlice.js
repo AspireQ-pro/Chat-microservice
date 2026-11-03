@@ -268,7 +268,7 @@ export const uploadProfileAvatar = createAsyncThunk(
 
 export const createGroup = createAsyncThunk(
   "chat/createGroup",
-  async ({ name, memberIds, avatarUrl, description }, { getState, rejectWithValue }) => {
+  async ({ name, memberIds, avatarUrl, description, adminOnlyMessages }, { getState, rejectWithValue }) => {
     try {
       if (!name || !memberIds?.length)
         return rejectWithValue("Name and members required");
@@ -278,7 +278,7 @@ export const createGroup = createAsyncThunk(
           "Content-Type": "application/json",
           ...authHeaders(getState),
         },
-        body: JSON.stringify({ name, memberIds, avatarUrl, description }),
+        body: JSON.stringify({ name, memberIds, avatarUrl, description, adminOnlyMessages: adminOnlyMessages === true }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create group");

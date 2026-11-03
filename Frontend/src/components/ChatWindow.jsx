@@ -57,6 +57,16 @@ function ChatWindow({
   // the profile endpoint).
   const isAdmin = Boolean(user?.role) && user.role.toLowerCase().includes("admin");
 
+  // A user can send in an admin-only group if they are the group creator or
+  // have an admin role.
+  const isGroupCreator = activeRoom?.createdById === currentUserId;
+  const canSendInAdminOnlyGroup = isAdmin || isGroupCreator;
+  const adminOnlyBlocked = Boolean(
+    activeContact?.isGroup &&
+    activeRoom?.adminOnlyMessages &&
+    !canSendInAdminOnlyGroup,
+  );
+
   if (!activeContact) {
     return (
       <Box
@@ -290,6 +300,11 @@ function ChatWindow({
               Group chat is not enabled for this project.
             </Alert>
           )}
+          {activeContact.isGroup && allowGroupChat && adminOnlyBlocked && (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              Only the group admin can send messages in this group.
+            </Alert>
+          )}
           {!activeContact.isGroup && !allowDirectChat && (
             <Alert severity="warning" sx={{ mb: 1 }}>
               Individual chat is not enabled for this project.
@@ -311,7 +326,7 @@ function ChatWindow({
             <IconButton
               aria-label="Attach image or PDF"
               onClick={() => fileInputRef.current?.click()}
-              disabled={!activeRoom?.id || uploadingFile || sendingFirstMessage || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
+              disabled={!activeRoom?.id || uploadingFile || sendingFirstMessage || adminOnlyBlocked || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
             >
               {uploadingFile ? <CircularProgress size={18} /> : <AttachFile fontSize="small" />}
             </IconButton>
@@ -328,12 +343,12 @@ function ChatWindow({
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={sendingFirstMessage || uploadingFile || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
+              disabled={sendingFirstMessage || uploadingFile || adminOnlyBlocked || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
               sx={{ "& .MuiOutlinedInput-root": { borderRadius: "12px", bgcolor: "#f8fafc" } }}
             />
             <IconButton
               onClick={handleSend}
-              disabled={!input.trim() || sendingFirstMessage || uploadingFile || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
+              disabled={!input.trim() || sendingFirstMessage || uploadingFile || adminOnlyBlocked || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
               sx={{
                 bgcolor: input.trim() ? "#3C4F4A" : "#e0e0e0",
                 color: input.trim() ? "#fff" : "#9e9e9e",
