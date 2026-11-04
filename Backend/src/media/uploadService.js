@@ -1,6 +1,8 @@
 const crypto = require("crypto");
 const { pipeline } = require("node:stream/promises");
 
+const { getUploadType } = require('../config/runtime');
+
 module.exports = function createMediaUploadService({
   prisma,
   jwt,
@@ -41,9 +43,10 @@ module.exports = function createMediaUploadService({
 
   function mediaUploadInput(req, imagesOnly = false) {
     const contentType = String(req.body?.contentType || "");
-    const type = UPLOAD_TYPES[contentType];
+    if (!contentType) return null;
+    const type = getUploadType(contentType);
     const size = Number(req.body?.size);
-    if (!type || (imagesOnly && type.fileType !== "image")) return null;
+    if (imagesOnly && type.fileType !== "image") return null;
     if (!Number.isInteger(size) || size < 1 || size > 25 * 1024 * 1024) return null;
     return { contentType, type, size };
   }
@@ -170,9 +173,15 @@ module.exports = function createMediaUploadService({
       return box === "ftyp" || box === "moov" || box === "mdat" || box === "free" || box === "wide";
     }
     if (mimeType === "video/webm") return buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3;
-    // Text/CSV — no reliable magic bytes; allow anything
-    if (mimeType === "text/plain" || mimeType === "text/csv") return true;
-    return false;
+    // Text/CSV/HTML/RTF and anything else — no reliable magic bytes; allow
+    if (
+      mimeType === "text/plain" || mimeType === "text/csv" ||
+      mimeType === "text/html" || mimeType === "text/rtf" || mimeType === "application/rtf"
+    ) return true;
+    // For any other / unknown MIME type: allow without signature check.
+    // The file extension comes from the MIME mapping (or '.bin' as fallback)
+    // so it is always safe regardless of byte content.
+    return true;
   }
 
   return {
