@@ -67,9 +67,12 @@ app.post(
   parseRoomUpload,
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "A file is required" });
-    const allowedType = UPLOAD_TYPES[req.file.mimetype];
-    if (!allowedType || !hasAllowedFileSignature(req.file.buffer, req.file.mimetype)) {
-      return res.status(400).json({ error: "File contents do not match an allowed type" });
+    // Accept any MIME type; getUploadType falls back to { extension: '.bin', fileType: 'file' }
+    // for types not in the explicit map. hasAllowedFileSignature now also returns true for unknowns.
+    const { getUploadType } = require('../config/runtime');
+    const allowedType = getUploadType(req.file.mimetype);
+    if (!hasAllowedFileSignature(req.file.buffer, req.file.mimetype)) {
+      return res.status(400).json({ error: "File contents could not be verified" });
     }
     const filename = `${crypto.randomUUID()}${allowedType.extension}`;
     const category = req.room.isGroup ? "groups" : "direct";
@@ -93,10 +96,11 @@ app.get(
   authenticateChatJWT,
   asyncHandler(async (req, res) => {
     const { roomId, filename } = req.params;
-    // Disallow path traversal and only allow UUID-named files with known extensions
+    // Disallow path traversal. Accept any UUID-named file (UUID + dot + safe extension).
+    // Extension: 1-12 alphanumeric chars — covers all known and future types (rtf, html, bin, …).
     if (
       path.basename(filename) !== filename ||
-      !/^[0-9a-f-]{36}\.(jpg|jpeg|png|gif|webp|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|mp3|ogg|wav|mp4|webm)$/i.test(filename)
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,12}$/i.test(filename)
     ) {
       return res.status(404).json({ error: "Attachment not found" });
     }
@@ -126,16 +130,22 @@ app.get(
     const category = room.isGroup ? "groups" : "direct";
     const key = referenced.fileStorageKey || legacyMediaKey(req.projectId, category, roomId, filename);
 
-    // Set Content-Disposition: images open inline; everything else triggers download
+    // Set Content-Disposition.
+    // Images and PDFs get 'inline' so the browser can render them directly.
+    // Everything else gets 'attachment' (office docs, zips, etc.) which the
+    // frontend preview dialog catches and shows a 'cannot preview' message + download.
     const downloadName = referenced.fileName || filename;
     // Sanitize for use in a header value
-    const safeName = downloadName.replace(/[^\w.\-]/g, "_").replace(/^_+|_+$/g, "") || filename;
+    const safeName = downloadName.replace(/[^\w.\-]/g, '_').replace(/^_+|_+$/g, '') || filename;
     const encodedName = encodeURIComponent(safeName);
-    const isImage = referenced.fileType === "image" || /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
-    const disposition = isImage
+    const isImage = referenced.fileType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
+    const isPdf = /\.pdf$/i.test(filename) || referenced.fileType === 'pdf';
+    const isAudioVideo = ['audio', 'video'].includes(referenced.fileType) ||
+      /\.(mp3|ogg|wav|mp4|webm)$/i.test(filename);
+    const disposition = (isImage || isPdf || isAudioVideo)
       ? `inline; filename="${safeName}"; filename*=UTF-8''${encodedName}`
       : `attachment; filename="${safeName}"; filename*=UTF-8''${encodedName}`;
-    res.setHeader("Content-Disposition", disposition);
+    res.setHeader('Content-Disposition', disposition);
 
     await sendStoredMedia(req, res, key);
   }),

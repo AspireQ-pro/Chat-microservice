@@ -10,6 +10,7 @@ import {
   Download, InsertDriveFile, PictureAsPdf, TableChart, Slideshow,
   Description, AudioFile, VideoFile, Archive, TextSnippet,
 } from '@mui/icons-material'
+import FilePreviewDialog from './FilePreviewDialog'
 
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
 function Ticks({ status }) {
@@ -166,6 +167,9 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     const cleanup = loadAttachment()
     return cleanup
   }, [loadAttachment])
+
+  /* ── file preview dialog ── */
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   /* ── context menu ── */
   const [menuAnchor, setMenuAnchor] = useState(null)
@@ -362,7 +366,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                 <Box
                   component="img" src={attachmentUrl}
                   alt={displayName || 'Chat attachment'}
-                  loading="lazy" onClick={handleDownload}
+                  loading="lazy" onClick={() => setPreviewOpen(true)}
                   sx={{
                     display: 'block', width: '100%', maxWidth: 260,
                     height: 'auto', maxHeight: 260, objectFit: 'cover',
@@ -431,6 +435,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
             {/* ── Document / generic file card ── */}
             {message.fileUrl && isFile && (
               <Box
+                onClick={() => !attachmentLoading && !attachmentError && setPreviewOpen(true)}
                 sx={{
                   display: 'flex', alignItems: 'center', gap: 1.25,
                   mt: message.text ? 1 : 0.25,
@@ -438,6 +443,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                   bgcolor: message.mine ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)',
                   borderRadius: 2,
                   minWidth: 180, maxWidth: 260,
+                  cursor: !attachmentLoading && !attachmentError ? 'pointer' : 'default',
                 }}
               >
                 <FileIcon fileName={displayName} fileType={message.fileType} />
@@ -468,13 +474,8 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                   </Tooltip>
                 )}
                 {!attachmentLoading && !attachmentError && attachmentUrl && (
-                  <Tooltip title={`Download ${displayName || 'file'}`}>
-                    <IconButton
-                      size="small" onClick={handleDownload}
-                      sx={{ color: iconColor, p: 0.25, flexShrink: 0 }}
-                    >
-                      <Download sx={{ fontSize: 18 }} />
-                    </IconButton>
+                  <Tooltip title="Open preview">
+                    <Download sx={{ fontSize: 18, color: iconColor, flexShrink: 0, opacity: 0.75 }} />
                   </Tooltip>
                 )}
               </Box>
@@ -512,6 +513,22 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
             Retry
           </Button>
         </Box>
+      )}
+
+      {/* File preview dialog */}
+      {Boolean(message.fileUrl) && (
+        <FilePreviewDialog
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          blobUrl={attachmentUrl}
+          fileName={displayName || message.fileName}
+          fileType={message.fileType}
+          fileSize={message.fileSize}
+          loading={attachmentLoading}
+          error={attachmentError}
+          onRetryLoad={() => { loadAttachment(); }}
+          onDownload={handleDownload}
+        />
       )}
 
       {/* Context menu */}
