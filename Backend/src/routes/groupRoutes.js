@@ -285,6 +285,19 @@ app.delete(`${API_BASE}/rooms/:roomId/members/:targetUserId`, authenticateChatJW
   const isMember = room.members.some((m) => m.userId === targetUserId);
   if (!isMember) return sendError(res, 404, 'User is not a member of this group');
 
+  // Count non-admin members after the proposed removal.
+  // The admin (createdById) must never count toward the 2-member minimum.
+  const nonAdminAfterRemoval = room.members.filter(
+    (m) => m.userId !== creatorId && m.userId !== targetUserId,
+  ).length;
+  if (nonAdminAfterRemoval < 2) {
+    return sendError(
+      res,
+      400,
+      'A group must have at least 2 members besides the admin. Add more members or delete the group.',
+    );
+  }
+
   await prisma.chatRoomMember.delete({
     where: { roomId_userId: { roomId, userId: targetUserId } },
   });
@@ -296,6 +309,30 @@ app.delete(`${API_BASE}/rooms/:roomId/members/:targetUserId`, authenticateChatJW
   }
   // Notify the removed user
   io.to(`user:${targetUserId}`).emit('member_removed', { roomId, userId: targetUserId });
+
+  res.json({ ok: true });
+}));
+
+// ─── Delete an entire group — owner only ──────────────────────────────────────
+// DELETE /api/rooms/:roomId
+app.delete(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (req, res) => {
+  const { roomId } = req.params;
+  const room = await prisma.chatRoom.findFirst({
+    where: { id: roomId, projectId: req.projectId, isGroup: true },
+    include: { members: { select: { userId: true } } },
+  });
+  if (!room) return sendError(res, 404, 'Group not found');
+  if (room.createdById !== req.userId) return sendError(res, 403, 'Only the group creator can delete the group');
+
+  const allMemberIds = room.members.map((m) => m.userId);
+
+  // Notify all members before deletion so clients can clear the room from their UI
+  for (const uid of allMemberIds) {
+    io.to(`user:${uid}`).emit('group_deleted', { roomId });
+  }
+
+  // Cascade in schema handles ChatRoomMember + Message + MessageDeletion rows
+  await prisma.chatRoom.delete({ where: { id: roomId } });
 
   res.json({ ok: true });
 }));
