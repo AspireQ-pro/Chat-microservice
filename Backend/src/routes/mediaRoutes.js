@@ -67,24 +67,20 @@ app.post(
   parseRoomUpload,
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "A file is required" });
-    // Accept any MIME type; getUploadType falls back to { extension: '.bin', fileType: 'file' }
-    // for types not in the explicit map. hasAllowedFileSignature now also returns true for unknowns.
     const { getUploadType } = require('../config/runtime');
-    const allowedType = getUploadType(req.file.mimetype);
-    if (!hasAllowedFileSignature(req.file.buffer, req.file.mimetype)) {
-      return res.status(400).json({ error: "File contents could not be verified" });
-    }
-    const filename = `${crypto.randomUUID()}${allowedType.extension}`;
-    const category = req.room.isGroup ? "groups" : "direct";
-    const key = mediaKey(req.projectId, category, req.room.id, filename);
-    await mediaStorage.putObject({ key, body: req.file.buffer, contentType: req.file.mimetype });
-    // Preserve original filename (sanitized) from the multipart upload field
+    // Use the original filename's extension for storage — no type restrictions
+    const mime = (req.file.mimetype || "application/octet-stream").trim() || "application/octet-stream";
     const originalName = req.file.originalname
       ? path.basename(req.file.originalname).replace(/[^\w.\-]/g, "_").slice(0, 255)
-      : filename;
+      : "";
+    const { extension, fileType } = getUploadType(mime, originalName);
+    const filename = `${crypto.randomUUID()}${extension}`;
+    const category = req.room.isGroup ? "groups" : "direct";
+    const key = mediaKey(req.projectId, category, req.room.id, filename);
+    await mediaStorage.putObject({ key, body: req.file.buffer, contentType: mime });
     res.status(201).json({
       fileUrl: `${BACKEND_URL}${API_BASE}/rooms/${req.params.roomId}/uploads/${filename}`,
-      fileType: allowedType.fileType,
+      fileType,
       fileName: originalName,
       fileSize: req.file.size,
     });
@@ -100,7 +96,7 @@ app.get(
     // Extension: 1-12 alphanumeric chars — covers all known and future types (rtf, html, bin, …).
     if (
       path.basename(filename) !== filename ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,12}$/i.test(filename)
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,20}$/i.test(filename)
     ) {
       return res.status(404).json({ error: "Attachment not found" });
     }

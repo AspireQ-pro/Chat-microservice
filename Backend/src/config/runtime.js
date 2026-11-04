@@ -58,48 +58,35 @@ if (isProduction) {
   }
 }
 
-// Known MIME → preferred extension + fileType category.
-// This map is used to pick a clean file extension when storing uploads.
-// Types NOT listed here still work — getUploadType() returns '.bin' as the extension.
-const UPLOAD_TYPES = {
-  // Images
-  "image/jpeg":  { extension: ".jpg",  fileType: "image" },
-  "image/png":   { extension: ".png",  fileType: "image" },
-  "image/gif":   { extension: ".gif",  fileType: "image" },
-  "image/webp":  { extension: ".webp", fileType: "image" },
-  // PDF
-  "application/pdf": { extension: ".pdf", fileType: "file" },
-  // Microsoft Office documents
-  "application/msword": { extension: ".doc", fileType: "file" },
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": { extension: ".docx", fileType: "file" },
-  "application/vnd.ms-excel": { extension: ".xls", fileType: "file" },
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": { extension: ".xlsx", fileType: "file" },
-  "application/vnd.ms-powerpoint": { extension: ".ppt", fileType: "file" },
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation": { extension: ".pptx", fileType: "file" },
-  // Rich Text
-  "text/rtf":         { extension: ".rtf", fileType: "file" },
-  "application/rtf":  { extension: ".rtf", fileType: "file" },
-  // HTML
-  "text/html":        { extension: ".html", fileType: "file" },
-  // Plain text and CSV
-  "text/plain":       { extension: ".txt", fileType: "file" },
-  "text/csv":         { extension: ".csv",  fileType: "file" },
-  // Archives
-  "application/zip":  { extension: ".zip",  fileType: "file" },
-  // Audio
-  "audio/mpeg": { extension: ".mp3", fileType: "audio" },
-  "audio/ogg":  { extension: ".ogg", fileType: "audio" },
-  "audio/wav":  { extension: ".wav", fileType: "audio" },
-  // Video
-  "video/mp4":  { extension: ".mp4", fileType: "video" },
-  "video/webm": { extension: ".webm", fileType: "video" },
-};
+// No MIME whitelist — all file types are accepted.
+// This function derives the storage extension and display category from
+// the original filename. No file is ever rejected based on type.
+function getUploadType(mimeType, originalName) {
+  // Determine fileType category for UI display (image / audio / video / file)
+  const mime = (mimeType || "").toLowerCase();
+  let fileType = "file";
+  if (mime.startsWith("image/")) fileType = "image";
+  else if (mime.startsWith("audio/")) fileType = "audio";
+  else if (mime.startsWith("video/")) fileType = "video";
 
-// Returns the upload type entry for any MIME type.
-// Unknown types get extension '.bin' so they are stored and served safely.
-function getUploadType(mimeType) {
-  return UPLOAD_TYPES[mimeType] || { extension: ".bin", fileType: "file" };
+  // Use the original filename's extension for storage — preserves the real type
+  if (originalName) {
+    const dot = originalName.lastIndexOf(".");
+    if (dot !== -1 && dot < originalName.length - 1) {
+      const ext = originalName.slice(dot).toLowerCase().replace(/[^a-z0-9.]/g, "");
+      if (ext.length >= 2 && ext.length <= 13) {
+        return { extension: ext, fileType };
+      }
+    }
+  }
+
+  // No extension in filename — use a safe generic fallback
+  return { extension: ".bin", fileType };
 }
+
+// Kept for backward-compat — callers that pass just a MIME still work
+const UPLOAD_TYPES = {};
+
 const KEEP_ALIVE_TIMEOUT_MS = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 5000);
 const HEADERS_TIMEOUT_MS = Number(process.env.HEADERS_TIMEOUT_MS || KEEP_ALIVE_TIMEOUT_MS + 1000);
 const RBAC_BACKEND_URL = (

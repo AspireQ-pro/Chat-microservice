@@ -10,10 +10,13 @@ function authHeaders(getState) {
 
 export async function uploadWithPresignedForm({ presignUrl, completeUrl, file, getState }) {
   const headers = authHeaders(getState);
+  // Some browsers report an empty MIME type for unusual file formats.
+  // Fall back to application/octet-stream so the backend always gets a valid value.
+  const contentType = file.type || "application/octet-stream";
   const presignResponse = await fetch(presignUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify({ contentType: file.type, size: file.size, fileName: file.name }),
+    body: JSON.stringify({ contentType, size: file.size, fileName: file.name }),
   });
   const presignData = await presignResponse.json();
   if (!presignResponse.ok) throw new Error(presignData.error || "Unable to prepare upload");
