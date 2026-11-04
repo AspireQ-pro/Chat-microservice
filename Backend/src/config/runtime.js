@@ -58,9 +58,9 @@ if (isProduction) {
   }
 }
 
-// Known MIME → { extension, fileType } mapping.
-// Any MIME type NOT listed here is still accepted — it falls back to the
-// getUploadType() helper below which returns { extension: '.bin', fileType: 'file' }.
+// Known MIME → preferred extension + fileType category.
+// This map is used to pick a clean file extension when storing uploads.
+// Types NOT listed here still work — getUploadType() returns '.bin' as the extension.
 const UPLOAD_TYPES = {
   // Images
   "image/jpeg":  { extension: ".jpg",  fileType: "image" },
