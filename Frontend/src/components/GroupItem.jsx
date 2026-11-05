@@ -6,7 +6,26 @@ function formatTime(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr);
   if (isNaN(d)) return "";
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - 6);
+
+  if (d >= startOfToday) {
+    // Today — show time only
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  if (d >= startOfYesterday) {
+    return "Yesterday";
+  }
+  if (d >= startOfWeek) {
+    // Within the last 7 days — show day name (e.g. "Mon")
+    return d.toLocaleDateString([], { weekday: "short" });
+  }
+  // Older — show date (e.g. "12/25/24")
+  return d.toLocaleDateString([], { month: "numeric", day: "numeric", year: "2-digit" });
 }
 
 function GroupItem({ room, active, unread = 0, onClick, onInfoClick }) {
