@@ -65,12 +65,13 @@ function formatLastSeen(iso) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
   const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diff < 60) return "last seen just now";
-  if (diff < 3600) return `last seen ${Math.floor(diff / 60)}m ago`;
-  const sameDay = d.toDateString() === new Date().toDateString();
-  if (sameDay)
-    return `last seen today ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-  return `last seen ${d.toLocaleDateString()}`;
+  if (diff < 60) return "Last seen just now";
+  if (diff < 3600) return `Last seen ${Math.floor(diff / 60)}m ago`;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `Last seen ${day}/${month}/${year}, ${time}`;
 }
 
 let clientMsgSeq = 0;
