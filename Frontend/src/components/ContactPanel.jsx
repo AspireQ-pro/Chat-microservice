@@ -130,15 +130,10 @@ function ContactPanel({
     .filter((room) => room.isGroup)
     .filter((room) => !searchLower || (room.name || "").toLowerCase().includes(searchLower))
     .slice()
-    .sort((a, b) => {
-      const unreadDiff =
-        (unreadCounts[b.id] || 0) - (unreadCounts[a.id] || 0);
-      if (unreadDiff) return unreadDiff;
-      return (
-        new Date(b.lastMessageAt || b.createdAt) -
-        new Date(a.lastMessageAt || a.createdAt)
-      );
-    });
+    .sort((a, b) =>
+      new Date(b.lastMessageAt || b.createdAt) -
+      new Date(a.lastMessageAt || a.createdAt)
+    );
 
   const searchPlaceholder =
     allowGroupChat && !allowDirectChat
