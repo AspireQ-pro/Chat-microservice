@@ -11,6 +11,7 @@ import {
   Description, AudioFile, VideoFile, Archive, TextSnippet,
 } from '@mui/icons-material'
 import FilePreviewDialog from './FilePreviewDialog'
+import { triggerDownload } from '../utils/fileOpener'
 
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
 function Ticks({ status }) {
@@ -75,6 +76,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
 
   /* ── attachment loading ── */
   const [attachmentUrl, setAttachmentUrl]       = useState(null)
+  const [attachmentBlob, setAttachmentBlob]     = useState(null)
   const [attachmentLoading, setAttachmentLoading] = useState(false)
   const [attachmentError, setAttachmentError]   = useState(false)
 
@@ -143,6 +145,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
         objectUrl = URL.createObjectURL(blob)
         if (!controller.signal.aborted) {
           setAttachmentUrl(objectUrl)
+          setAttachmentBlob(blob)
           setAttachmentLoading(false)
         }
       })
@@ -163,6 +166,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
 
   useEffect(() => {
     setAttachmentUrl(null)
+    setAttachmentBlob(null)
     setAttachmentError(false)
     const cleanup = loadAttachment()
     return cleanup
@@ -231,12 +235,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
   /* ── download (preserves original filename & binary content) ── */
   const handleDownload = useCallback(() => {
     if (!attachmentUrl) return
-    const a = document.createElement('a')
-    a.href = attachmentUrl
-    a.download = message.fileName || (message.fileUrl ? message.fileUrl.split('/').pop().split('?')[0] : 'download')
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    triggerDownload(attachmentUrl, message.fileName || (message.fileUrl ? message.fileUrl.split('/').pop().split('?')[0] : 'download'))
   }, [attachmentUrl, message.fileName, message.fileUrl])
 
   /* ─── derived flags ─────────────────────────────────────────────────── */
@@ -521,13 +520,16 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
           open={previewOpen}
           onClose={() => setPreviewOpen(false)}
           blobUrl={attachmentUrl}
+          proxyUrl={proxyFallbackUrl()}
           fileName={displayName || message.fileName}
           fileType={message.fileType}
+          mimeType={message.mimeType || undefined}
           fileSize={message.fileSize}
           loading={attachmentLoading}
           error={attachmentError}
           onRetryLoad={() => { loadAttachment(); }}
           onDownload={handleDownload}
+          blob={attachmentBlob}
         />
       )}
 
