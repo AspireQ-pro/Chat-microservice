@@ -126,22 +126,12 @@ app.get(
     const category = room.isGroup ? "groups" : "direct";
     const key = referenced.fileStorageKey || legacyMediaKey(req.projectId, category, roomId, filename);
 
-    // Set Content-Disposition.
-    // Images and PDFs get 'inline' so the browser can render them directly.
-    // Everything else gets 'attachment' (office docs, zips, etc.) which the
-    // frontend preview dialog catches and shows a 'cannot preview' message + download.
+    // Always serve inline so the browser / OS viewer can open the file directly.
+    // The frontend handles explicit downloads by fetching the blob and using <a download>.
     const downloadName = referenced.fileName || filename;
-    // Sanitize for use in a header value
     const safeName = downloadName.replace(/[^\w.\-]/g, '_').replace(/^_+|_+$/g, '') || filename;
     const encodedName = encodeURIComponent(safeName);
-    const isImage = referenced.fileType === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
-    const isPdf = /\.pdf$/i.test(filename) || referenced.fileType === 'pdf';
-    const isAudioVideo = ['audio', 'video'].includes(referenced.fileType) ||
-      /\.(mp3|ogg|wav|mp4|webm)$/i.test(filename);
-    const disposition = (isImage || isPdf || isAudioVideo)
-      ? `inline; filename="${safeName}"; filename*=UTF-8''${encodedName}`
-      : `attachment; filename="${safeName}"; filename*=UTF-8''${encodedName}`;
-    res.setHeader('Content-Disposition', disposition);
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"; filename*=UTF-8''${encodedName}`);
 
     await sendStoredMedia(req, res, key);
   }),
