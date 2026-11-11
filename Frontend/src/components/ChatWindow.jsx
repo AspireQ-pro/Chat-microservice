@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useCallback, useState } from "react";
 import { useSelector } from "react-redux";
 import {
   Alert,
@@ -8,7 +8,9 @@ import {
   Button,
   CircularProgress,
   IconButton,
+  LinearProgress,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import arrowIcon from "@/assets/arrow.svg";
@@ -36,6 +38,7 @@ function ChatWindow({
   onAcceptRequest,
   onUploadFile,
   uploadingFile,
+  uploadProgress,
   sendError,
   sendingFirstMessage,
   input,
@@ -52,13 +55,8 @@ function ChatWindow({
   const user = useSelector((s) => s.auth.user);
   const allowGroupChat = Boolean(user?.allowGroupChat);
   const allowDirectChat = Boolean(user?.allowDirectChat);
-  // Admin role lets a user delete any message for everyone in both group and
-  // direct chats. The role comes from the JWT payload (and is refreshed via
-  // the profile endpoint).
   const isAdmin = Boolean(user?.role) && user.role.toLowerCase().includes("admin");
 
-  // A user can send in an admin-only group if they are the group creator or
-  // have an admin role.
   const isGroupCreator = activeRoom?.createdById === currentUserId;
   const canSendInAdminOnlyGroup = isAdmin || isGroupCreator;
   const adminOnlyBlocked = Boolean(
@@ -66,6 +64,41 @@ function ChatWindow({
     activeRoom?.adminOnlyMessages &&
     !canSendInAdminOnlyGroup,
   );
+
+  // Phase 3: drag-and-drop state
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // Derived: whether the input bar is functional
+  const chatFeatureDisabled = activeContact?.isGroup ? !allowGroupChat : !allowDirectChat;
+  const inputDisabled = sendingFirstMessage || uploadingFile || adminOnlyBlocked || chatFeatureDisabled;
+  // Phase 3: also disable attach button when socket is disconnected
+  const attachDisabled = !activeRoom?.id || uploadingFile || sendingFirstMessage || adminOnlyBlocked || chatFeatureDisabled || socketConnected === false;
+
+  // Phase 3: drag-and-drop handlers — attached to the whole chat body
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (attachDisabled) return;
+    setIsDragOver(true);
+  }, [attachDisabled]);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only clear when leaving the outer container, not a child element
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    if (attachDisabled) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) onUploadFile?.(file);
+  }, [attachDisabled, onUploadFile]);
 
   if (!activeContact) {
     return (
@@ -131,8 +164,38 @@ function ChatWindow({
         minHeight: 0,
         minWidth: 0,
         height: "100%",
+        // Phase 3: drag-and-drop visual overlay
+        position: "relative",
       }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
+      {/* Phase 3: drag-and-drop drop-zone overlay */}
+      {isDragOver && (
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 10,
+            bgcolor: "rgba(60,79,74,0.12)",
+            border: "2px dashed #3C4F4A",
+            borderRadius: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <Box sx={{ textAlign: "center" }}>
+            <AttachFile sx={{ fontSize: 48, color: "#3C4F4A", opacity: 0.6, mb: 1 }} />
+            <Typography variant="body1" fontWeight={600} sx={{ color: "#3C4F4A" }}>
+              Drop file to send
+            </Typography>
+          </Box>
+        </Box>
+      )}
+
       {/* Chat header */}
       <Box
         sx={{
@@ -201,11 +264,9 @@ function ChatWindow({
             {headerStatus}
           </Typography>
         </Box>
-
-
       </Box>
 
-      {/* Reconnecting banner — shown when socket is disconnected (polling fallback active) */}
+      {/* Reconnecting banner */}
       {socketConnected === false && (
         <Box
           sx={{
@@ -222,6 +283,36 @@ function ChatWindow({
           <Typography variant="caption" sx={{ color: "#92400e", fontWeight: 500 }}>
             Reconnecting… messages will update automatically
           </Typography>
+        </Box>
+      )}
+
+      {/* Phase 3: upload progress bar — shown while a file is uploading */}
+      {uploadingFile && uploadProgress != null && (
+        <Box sx={{ px: 0 }}>
+          <LinearProgress
+            variant={uploadProgress > 0 ? "determinate" : "indeterminate"}
+            value={uploadProgress}
+            sx={{
+              height: 3,
+              bgcolor: "rgba(60,79,74,0.12)",
+              "& .MuiLinearProgress-bar": { bgcolor: "#3C4F4A" },
+            }}
+          />
+          {uploadProgress > 0 && uploadProgress < 100 && (
+            <Typography
+              variant="caption"
+              sx={{
+                display: "block",
+                textAlign: "right",
+                px: 1.5,
+                pt: 0.25,
+                fontSize: "0.65rem",
+                color: "text.secondary",
+              }}
+            >
+              Uploading… {uploadProgress}%
+            </Typography>
+          )}
         </Box>
       )}
 
@@ -312,10 +403,13 @@ function ChatWindow({
           )}
           {sendError && <Alert severity="error" sx={{ mb: 1 }}>{sendError}</Alert>}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {/* Phase 1 fix: removed non-standard accept="*".
+                Phase 3: works correctly on mobile — no accept attribute means
+                the OS native picker shows all file types (Files app on iOS,
+                file chooser on Android). */}
             <input
               ref={fileInputRef}
               type="file"
-              accept="*"
               hidden
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -323,13 +417,32 @@ function ChatWindow({
                 event.target.value = "";
               }}
             />
-            <IconButton
-              aria-label="Attach image or PDF"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!activeRoom?.id || uploadingFile || sendingFirstMessage || adminOnlyBlocked || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
+            {/* Phase 3: disabled when socket is disconnected;
+                touch-friendly minimum target size (40×40 px) preserved */}
+            <Tooltip
+              title={socketConnected === false ? "Reconnecting… wait to send files" : "Attach file"}
+              placement="top"
             >
-              {uploadingFile ? <CircularProgress size={18} /> : <AttachFile fontSize="small" />}
-            </IconButton>
+              {/* span required by Tooltip when child is disabled */}
+              <span>
+                <IconButton
+                  aria-label="Attach file"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={attachDisabled}
+                  sx={{
+                    p: 1,
+                    minWidth: 40,
+                    minHeight: 40,
+                    // Show a subtle offline tint when disconnected
+                    opacity: socketConnected === false ? 0.5 : 1,
+                  }}
+                >
+                  {uploadingFile
+                    ? <CircularProgress size={18} />
+                    : <AttachFile fontSize="small" />}
+                </IconButton>
+              </span>
+            </Tooltip>
             <TextField
               fullWidth
               multiline
@@ -343,12 +456,12 @@ function ChatWindow({
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={sendingFirstMessage || uploadingFile || adminOnlyBlocked || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
+              disabled={inputDisabled}
               sx={{ "& .MuiOutlinedInput-root": { borderRadius: "12px", bgcolor: "#f8fafc" } }}
             />
             <IconButton
               onClick={handleSend}
-              disabled={!input.trim() || sendingFirstMessage || uploadingFile || adminOnlyBlocked || (activeContact.isGroup ? !allowGroupChat : !allowDirectChat)}
+              disabled={!input.trim() || inputDisabled}
               sx={{
                 bgcolor: input.trim() ? "#3C4F4A" : "#e0e0e0",
                 color: input.trim() ? "#fff" : "#9e9e9e",

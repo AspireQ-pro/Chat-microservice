@@ -137,6 +137,8 @@ export function useChatHandler() {
   const [sendError, setSendError] = useState("");
   const [sendingFirstMessage, setSendingFirstMessage] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  // Phase 3: track S3 upload progress (0–100 %). null = not uploading.
+  const [uploadProgress, setUploadProgress] = useState(null);
 
   const searchTimer = useRef(null);
   const messagesEndRef = useRef(null);
@@ -587,6 +589,11 @@ export function useChatHandler() {
           content: message.text || undefined,
           fileUrl: message.fileUrl || undefined,
           fileType: message.fileType || undefined,
+          // Phase 1 fix: preserve all attachment metadata on retry so the
+          // DB record is created with the correct fileName, fileSize and mimeType.
+          fileName: message.fileUrl ? (message.fileName || undefined) : undefined,
+          fileSize: message.fileUrl ? (message.fileSize || undefined) : undefined,
+          mimeType: message.fileUrl ? (message.mimeType || undefined) : undefined,
           clientId: message.clientId,
         });
       } else {
@@ -624,12 +631,22 @@ export function useChatHandler() {
     }
 
     setUploadingFile(true);
+    setUploadProgress(0);
     setSendError("");
     try {
       const uploaded = await dispatch(
-        uploadChatFile({ roomId: activeRoomId, file }),
+        uploadChatFile({
+          roomId: activeRoomId,
+          file,
+          // Phase 3: live progress callback — updates the progress bar in ChatWindow.
+          onProgress: (pct) => setUploadProgress(pct),
+        }),
       ).unwrap();
       const clientId = makeClientId();
+      // Phase 4: prefer the backend-normalised mimeType from the upload response
+      // (available when using the direct proxy route). Fall back to the browser's
+      // file.type, then to application/octet-stream.
+      const mimeType = uploaded.mimeType || file.type || "application/octet-stream";
       dispatch(
         appendMessage({
           roomId: activeRoomId,
@@ -644,6 +661,7 @@ export function useChatHandler() {
             fileType: uploaded.fileType,
             fileName: uploaded.fileName || file.name || null,
             fileSize: uploaded.fileSize || file.size || null,
+            mimeType,
             messageType: uploaded.fileType === "image" ? "image" : uploaded.fileType === "audio" ? "audio" : uploaded.fileType === "video" ? "video" : "file",
             time: new Date().toLocaleTimeString([], {
               hour: "2-digit",
@@ -661,14 +679,18 @@ export function useChatHandler() {
         fileType: uploaded.fileType,
         fileName: uploaded.fileName || file.name || null,
         fileSize: uploaded.fileSize || file.size || null,
+        // Phase 4: include mimeType in the socket event so the backend can
+        // persist it on the Message record.
+        mimeType,
         clientId,
       });
     } catch (err) {
       setSendError(err || "File upload failed. Try again.");
     } finally {
       setUploadingFile(false);
+      setUploadProgress(null);
     }
-  }, [dispatch, activeRoomId, chatUserId, currentUser?.name]);
+  }, [dispatch, activeRoomId, chatUserId, currentUser?.name, activeRoom, currentUser?.allowGroupChat, currentUser?.allowDirectChat]);
 
   const handleSelectContact = useCallback(
     (contactId) => {
@@ -840,6 +862,7 @@ export function useChatHandler() {
     sendError,
     sendingFirstMessage,
     uploadingFile,
+    uploadProgress,
     setInput,
     setSearch,
     setShowPanel,
