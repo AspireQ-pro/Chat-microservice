@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
-import { uploadWithPresignedForm } from "../features/media/upload";
+import { uploadWithPresignedForm, uploadViaProxy } from "../features/media/upload";
 import { setMyAvatarUrl, setUserRole } from "./authSlice";
 
 const API =
@@ -308,16 +308,13 @@ export const uploadChatFile = createAsyncThunk(
         onProgress, // passed through to XHR progress events
       });
       if (presigned.mode !== "proxy") return { roomId, ...presigned };
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch(`${API_BASE}/rooms/${roomId}/upload`, {
-        method: "POST",
-        headers: authHeaders(getState),
-        body: formData,
+      const proxyData = await uploadViaProxy({
+        proxyUrl: `${API_BASE}/rooms/${roomId}/upload`,
+        file,
+        getState,
+        onProgress,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "File upload failed");
-      return { roomId, ...data };
+      return { roomId, ...proxyData };
     } catch (err) {
       return rejectWithValue(err.message);
     }
