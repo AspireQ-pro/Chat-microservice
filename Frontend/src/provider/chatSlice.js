@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
-import { uploadWithPresignedForm } from "../features/media/upload";
+import { uploadWithPresignedForm, uploadViaProxy } from "../features/media/upload";
 import { setMyAvatarUrl, setUserRole } from "./authSlice";
 
 const API =
@@ -74,6 +74,8 @@ function normalizeMessage(m, currentUserId) {
     fileType: m.fileType || null,
     fileName: m.fileName || null,
     fileSize: m.fileSize || null,
+    // Phase 4: preserve mimeType from server; null for legacy messages (backward compat).
+    mimeType: m.mimeType || null,
     messageType: m.messageType || "text",
     time: new Date(m.createdAt || Date.now()).toLocaleTimeString([], {
       hour: "2-digit",
@@ -291,25 +293,28 @@ export const createGroup = createAsyncThunk(
 
 export const uploadChatFile = createAsyncThunk(
   "chat/uploadChatFile",
-  async ({ roomId, file }, { getState, rejectWithValue }) => {
+  // Phase 3: accept an optional onProgress callback for upload percentage reporting.
+  // createAsyncThunk serialises arguments, so we pass onProgress separately via
+  // a closure stored on the file object — but that is fragile. Instead we accept
+  // it as a plain argument and explicitly skip Redux serialisation warnings by
+  // passing a plain function reference.
+  async ({ roomId, file, onProgress }, { getState, rejectWithValue }) => {
     try {
       const presigned = await uploadWithPresignedForm({
         presignUrl: `${API_BASE}/rooms/${roomId}/upload-url`,
         completeUrl: `${API_BASE}/rooms/${roomId}/upload-complete`,
         file,
         getState,
+        onProgress, // passed through to XHR progress events
       });
       if (presigned.mode !== "proxy") return { roomId, ...presigned };
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch(`${API_BASE}/rooms/${roomId}/upload`, {
-        method: "POST",
-        headers: authHeaders(getState),
-        body: formData,
+      const proxyData = await uploadViaProxy({
+        proxyUrl: `${API_BASE}/rooms/${roomId}/upload`,
+        file,
+        getState,
+        onProgress,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "File upload failed");
-      return { roomId, ...data };
+      return { roomId, ...proxyData };
     } catch (err) {
       return rejectWithValue(err.message);
     }

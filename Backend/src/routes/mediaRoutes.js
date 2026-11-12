@@ -39,6 +39,9 @@ app.post(
       fileType: payload.fileType,
       fileName: saved.fileName || payload.filename,
       fileSize: saved.size,
+      // Phase 4: return the original MIME type so the frontend can pass it
+      // through the socket send_message event and store it on the Message.
+      mimeType: payload.contentType || null,
     });
   }),
 );
@@ -83,6 +86,8 @@ app.post(
       fileType,
       fileName: originalName,
       fileSize: req.file.size,
+      // Phase 4: return the original MIME type so the frontend can persist it.
+      mimeType: mime,
     });
   }),
 );

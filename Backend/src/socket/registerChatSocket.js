@@ -23,12 +23,15 @@ async function updateRoomLastMessage(roomId) {
   const lastMsg = await prisma.message.findFirst({
     where: { roomId, isDeleted: false },
     orderBy: { createdAt: "desc" },
-    select: { createdAt: true, content: true, messageType: true },
+    select: { createdAt: true, content: true, messageType: true, fileType: true },
   });
   let preview = "";
   let lastMessageAt = null;
   if (lastMsg) {
     if (lastMsg.messageType === "image") preview = "📷 Photo";
+    // Phase 4: use fileType for precise audio/video labels (messageType is always "file" for these).
+    else if (lastMsg.fileType === "audio") preview = "🎵 Audio";
+    else if (lastMsg.fileType === "video") preview = "🎬 Video";
     else if (lastMsg.messageType === "file") preview = "📎 File";
     else preview = (decryptContent(lastMsg.content) || "").slice(0, 100);
     lastMessageAt = lastMsg.createdAt;
@@ -215,7 +218,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "send_message",
-    async ({ roomId, content, fileUrl, fileType, fileName, fileSize, clientId }) => {
+    async ({ roomId, content, fileUrl, fileType, fileName, fileSize, mimeType, clientId }) => {
       // The sender is always the authenticated JWT user (never client-supplied).
       const senderId = socket.userId;
       if (!roomId || (!content && !fileUrl)) {
@@ -345,10 +348,15 @@ io.on("connection", (socket) => {
             ? "image"
             : "file"
           : "text";
+        // Phase 4: improved room preview text for audio and video.
         const plainPreview = fileUrl
           ? fileType === "image"
-            ? "ðŸ“· Photo"
-            : "ðŸ“Ž File"
+            ? "📷 Photo"
+            : fileType === "audio"
+              ? "🎵 Audio"
+              : fileType === "video"
+                ? "🎬 Video"
+                : "📎 File"
           : content?.slice(0, 100) || "";
 
         // Is anyone else in the room currently online? If so, mark delivered now.
@@ -371,6 +379,10 @@ io.on("connection", (socket) => {
             fileStorageKey,
             fileName: fileUrl ? (String(fileName || "").slice(0, 255) || null) : null,
             fileSize: fileUrl && Number.isFinite(Number(fileSize)) && fileSize > 0 ? Number(fileSize) : null,
+            // Phase 4: persist the original MIME type for accurate rendering.
+            // Sanitise to max 255 chars. Null for text messages and for
+            // legacy messages upgraded without this field.
+            mimeType: fileUrl ? (String(mimeType || "").slice(0, 255) || null) : null,
             messageType,
             deliveredAt: someRecipientOnline ? new Date() : null,
           },
