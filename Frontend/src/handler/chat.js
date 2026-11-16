@@ -636,8 +636,15 @@ export function useChatHandler() {
     [dispatch],
   );
 
-  const handleUploadFile = useCallback(async (file) => {
-    if (!file || !activeRoomId) return;
+  const handleUploadFiles = useCallback(async (files) => {
+    // Accept a single File, a FileList, or an array of Files
+    const fileArray = files instanceof FileList
+      ? Array.from(files)
+      : Array.isArray(files)
+        ? files
+        : files ? [files] : [];
+
+    if (!fileArray.length || !activeRoomId) return;
     if (activeRoom?.isGroup && currentUser?.allowGroupChat === false) {
       setSendError("Group chat is not enabled for this project.");
       return;
@@ -652,79 +659,78 @@ export function useChatHandler() {
       return;
     }
 
-    // Per-type size limits (enforced again on the backend)
-    const IMAGE_LIMIT = 7 * 1024 * 1024   // 7 MB
-    const VIDEO_LIMIT = 30 * 1024 * 1024  // 30 MB
-    const mime = file.type || ''
-    if (mime.startsWith('image/') && file.size > IMAGE_LIMIT) {
-      setSendError('Images must be 7 MB or smaller.')
-      return
-    }
-    if (mime.startsWith('video/') && file.size > VIDEO_LIMIT) {
-      setSendError('Videos must be 30 MB or smaller.')
-      return
+    const IMAGE_LIMIT = 7 * 1024 * 1024;
+    const VIDEO_LIMIT = 30 * 1024 * 1024;
+
+    // Validate all files up front before starting any upload
+    for (const file of fileArray) {
+      const mime = file.type || "";
+      if (mime.startsWith("image/") && file.size > IMAGE_LIMIT) {
+        setSendError(`"${file.name}" exceeds the 7 MB image limit.`);
+        return;
+      }
+      if (mime.startsWith("video/") && file.size > VIDEO_LIMIT) {
+        setSendError(`"${file.name}" exceeds the 30 MB video limit.`);
+        return;
+      }
     }
 
-    setUploadingFile(true);
-    setUploadProgress(0);
     setSendError("");
-    try {
-      const uploaded = await dispatch(
-        uploadChatFile({
-          roomId: activeRoomId,
-          file,
-          // Phase 3: live progress callback — updates the progress bar in ChatWindow.
-          onProgress: (pct) => setUploadProgress(pct),
-        }),
-      ).unwrap();
-      const clientId = makeClientId();
-      // Phase 4: prefer the backend-normalised mimeType from the upload response
-      // (available when using the direct proxy route). Fall back to the browser's
-      // file.type, then to application/octet-stream.
-      const mimeType = uploaded.mimeType || file.type || "application/octet-stream";
-      dispatch(
-        appendMessage({
-          roomId: activeRoomId,
-          message: {
-            id: `optimistic-${clientId}`,
-            clientId,
+    setUploadingFile(true);
+
+    // Upload files one after another so the socket isn't flooded
+    for (const file of fileArray) {
+      setUploadProgress(0);
+      try {
+        const uploaded = await dispatch(
+          uploadChatFile({
             roomId: activeRoomId,
-            senderId: chatUserId,
-            senderName: currentUser?.name || "",
-            text: "",
-            fileUrl: uploaded.fileUrl,
-            fileType: uploaded.fileType,
-            fileName: uploaded.fileName || file.name || null,
-            fileSize: uploaded.fileSize || file.size || null,
-            mimeType,
-            messageType: uploaded.fileType === "image" ? "image" : uploaded.fileType === "audio" ? "audio" : uploaded.fileType === "video" ? "video" : "file",
-            time: new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-            createdAt: new Date().toISOString(),
-            mine: true,
-            status: "sending",
-          },
-        }),
-      );
-      socket.emit("send_message", {
-        roomId: activeRoomId,
-        fileUrl: uploaded.fileUrl,
-        fileType: uploaded.fileType,
-        fileName: uploaded.fileName || file.name || null,
-        fileSize: uploaded.fileSize || file.size || null,
-        // Phase 4: include mimeType in the socket event so the backend can
-        // persist it on the Message record.
-        mimeType,
-        clientId,
-      });
-    } catch (err) {
-      setSendError(err || "File upload failed. Try again.");
-    } finally {
-      setUploadingFile(false);
-      setUploadProgress(null);
+            file,
+            onProgress: (pct) => setUploadProgress(pct),
+          }),
+        ).unwrap();
+        const clientId = makeClientId();
+        const mimeType = uploaded.mimeType || file.type || "application/octet-stream";
+        dispatch(
+          appendMessage({
+            roomId: activeRoomId,
+            message: {
+              id: `optimistic-${clientId}`,
+              clientId,
+              roomId: activeRoomId,
+              senderId: chatUserId,
+              senderName: currentUser?.name || "",
+              text: "",
+              fileUrl: uploaded.fileUrl,
+              fileType: uploaded.fileType,
+              fileName: uploaded.fileName || file.name || null,
+              fileSize: uploaded.fileSize || file.size || null,
+              mimeType,
+              messageType: uploaded.fileType === "image" ? "image" : uploaded.fileType === "audio" ? "audio" : uploaded.fileType === "video" ? "video" : "file",
+              time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              createdAt: new Date().toISOString(),
+              mine: true,
+              status: "sending",
+            },
+          }),
+        );
+        socket.emit("send_message", {
+          roomId: activeRoomId,
+          fileUrl: uploaded.fileUrl,
+          fileType: uploaded.fileType,
+          fileName: uploaded.fileName || file.name || null,
+          fileSize: uploaded.fileSize || file.size || null,
+          mimeType,
+          clientId,
+        });
+      } catch (err) {
+        setSendError(err || `Failed to upload "${file.name}". Try again.`);
+        break; // stop remaining uploads on first error
+      }
     }
+
+    setUploadingFile(false);
+    setUploadProgress(null);
   }, [dispatch, activeRoomId, chatUserId, currentUser?.name, activeRoom, currentUser?.allowGroupChat, currentUser?.allowDirectChat]);
 
   const handleSelectContact = useCallback(
@@ -923,7 +929,7 @@ export function useChatHandler() {
     handleSelectContact,
     handleSelectRoom,
     handleAcceptRequest,
-    handleUploadFile,
+    handleUploadFiles,
     getLastMessage,
     getUnreadCount,
     openGroupDialog,

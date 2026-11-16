@@ -38,7 +38,7 @@ function ChatPage() {
     handleSelectContact,
     handleSelectRoom,
     handleAcceptRequest,
-    handleUploadFile,
+    handleUploadFiles,
     getLastMessage,
     getUnreadCount,
     unreadCounts,
@@ -108,7 +108,7 @@ function ChatPage() {
       onMessagesScroll={handleMessagesScroll}
       onRetryMessage={handleRetryMessage}
       onAcceptRequest={handleAcceptRequest}
-      onUploadFile={handleUploadFile}
+      onUploadFile={handleUploadFiles}
       uploadingFile={uploadingFile}
       uploadProgress={uploadProgress}
       sendError={sendError}

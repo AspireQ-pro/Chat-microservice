@@ -176,8 +176,8 @@ function ChatWindow({
     e.stopPropagation();
     setIsDragOver(false);
     if (attachDisabled) return;
-    const file = e.dataTransfer.files?.[0];
-    if (file) onUploadFile?.(file);
+    const files = e.dataTransfer.files;
+    if (files?.length) onUploadFile?.(files);
   }, [attachDisabled, onUploadFile]);
 
   // ── Empty state ──
@@ -270,7 +270,7 @@ function ChatWindow({
           <Box sx={{ textAlign: "center" }}>
             <AttachFile sx={{ fontSize: 48, color: "#3C4F4A", opacity: 0.6, mb: 1 }} />
             <Typography variant="body1" fontWeight={600} sx={{ color: "#3C4F4A" }}>
-              Drop file to send
+              Drop files to send
             </Typography>
           </Box>
         </Box>
@@ -610,10 +610,11 @@ function ChatWindow({
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               hidden
               onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) onUploadFile?.(file);
+                const files = event.target.files;
+                if (files?.length) onUploadFile?.(files);
                 event.target.value = "";
               }}
             />
