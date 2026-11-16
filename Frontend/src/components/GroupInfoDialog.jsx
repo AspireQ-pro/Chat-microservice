@@ -100,6 +100,9 @@ function GroupInfoDialog({
   /* ── Promote to admin state ── */
   const [promotingId, setPromotingId] = useState(null)
 
+  /* ── Avatar lightbox ── */
+  const [avatarLightbox, setAvatarLightbox] = useState(false)
+
   /* ── Min-member warning (shown when removal would leave < 2 non-admin members) ── */
   const [minMemberWarning, setMinMemberWarning] = useState(false)
 
@@ -306,12 +309,14 @@ function GroupInfoDialog({
           <Box sx={{ position: 'relative' }}>
             <AuthenticatedAvatar
               src={savedAvatarPreview || room?.avatarUrl || undefined}
+              onClick={(savedAvatarPreview || room?.avatarUrl) ? () => setAvatarLightbox(true) : undefined}
               sx={{
                 width: 80,
                 height: 80,
                 bgcolor: '#7e57c2',
                 fontSize: '1.8rem',
                 fontWeight: 700,
+                cursor: (savedAvatarPreview || room?.avatarUrl) ? 'zoom-in' : 'default',
               }}
             >
               {initials(room?.name || 'GR')}
@@ -951,6 +956,47 @@ function GroupInfoDialog({
     />
   )
 
+  /* ── Avatar lightbox ── */
+  const AvatarLightbox = (
+    <Dialog
+      open={avatarLightbox}
+      onClose={() => setAvatarLightbox(false)}
+      maxWidth={false}
+      PaperProps={{
+        sx: {
+          bgcolor: 'transparent',
+          boxShadow: 'none',
+          overflow: 'visible',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+      }}
+      slotProps={{ backdrop: { sx: { bgcolor: 'rgba(0,0,0,0.85)' } } }}
+      onClick={() => setAvatarLightbox(false)}
+    >
+      <Box sx={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+        <AuthenticatedAvatar
+          src={savedAvatarPreview || room?.avatarUrl || undefined}
+          sx={{ width: 280, height: 280, fontSize: '5rem', bgcolor: '#7e57c2' }}
+        >
+          {initials(room?.name || 'GR')}
+        </AuthenticatedAvatar>
+        <IconButton
+          onClick={() => setAvatarLightbox(false)}
+          size="small"
+          sx={{
+            position: 'absolute', top: -12, right: -12,
+            bgcolor: 'rgba(0,0,0,0.6)', color: '#fff',
+            '&:hover': { bgcolor: 'rgba(0,0,0,0.85)' },
+          }}
+        >
+          <Close sx={{ fontSize: 18 }} />
+        </IconButton>
+      </Box>
+    </Dialog>
+  )
+
   if (isMobileOrTablet) {
     return (
       <Dialog
@@ -980,6 +1026,7 @@ function GroupInfoDialog({
           ))}
         </Box>
         {Toast}
+        {AvatarLightbox}
       </Dialog>
     )
   }
@@ -1025,6 +1072,7 @@ function GroupInfoDialog({
         })}
       </Box>
       {Toast}
+      {AvatarLightbox}
     </Dialog>
   )
 }
