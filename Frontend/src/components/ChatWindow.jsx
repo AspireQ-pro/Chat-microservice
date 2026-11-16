@@ -438,7 +438,7 @@ function ChatWindow({
       <Box
         ref={messagesContainerRef}
         onScroll={onMessagesScroll}
-        sx={{ flex: 1, minHeight: 0, overflowY: "auto", py: 2, bgcolor: "#fafafa" }}
+        sx={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", py: 2, bgcolor: "#fafafa" }}
       >
         {loadingOlder && (
           <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}>
