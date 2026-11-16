@@ -675,6 +675,8 @@ const chatSlice = createSlice({
           list[optIdx] = {
             ...existing,
             ...normalized,
+            // Preserve the optimistic senderName if the server payload didn't include sender
+            senderName: normalized.senderName || existing.senderName || "",
             status: finalStatus,
             deliveredAt: normalized.deliveredAt || existing.deliveredAt || null,
           };
