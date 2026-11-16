@@ -569,31 +569,51 @@ function GroupInfoDialog({
           </Box>
         </Box>
 
-        {/* Leave group — non-owners */}
-        {!isOwner && (
-          <Box sx={{ px: 2.5, pt: 1.5, pb: 3 }}>
-            <Button
-              fullWidth
-              variant="outlined"
-              color="error"
-              startIcon={leaving ? <CircularProgress size={16} color="inherit" /> : <ExitToApp />}
-              disabled={leaving}
-              onClick={handleLeave}
-              sx={{
-                borderRadius: '12px',
-                height: 48,
-                fontWeight: 600,
-                textTransform: 'none',
-                fontSize: '0.9rem',
-                borderColor: '#ef9a9a',
-                color: '#c62828',
-                '&:hover': { bgcolor: '#FEEBEE', borderColor: '#c62828' },
-              }}
-            >
-              {leaving ? 'Leaving…' : 'Exit group'}
-            </Button>
-          </Box>
-        )}
+        {/* Leave group — available to all members including admins.
+            Blocked only when the current user is the sole remaining admin
+            (leaving would make the group unmanageable). */}
+        {(() => {
+          const adminCount = members.filter((m) => m.role === 'admin').length
+          const isLastAdmin = isAdmin && adminCount <= 1
+          return (
+            <Box sx={{ px: 2.5, pt: 1.5, pb: 3 }}>
+              <Tooltip
+                title={isLastAdmin ? 'Promote another member to admin before leaving' : ''}
+                disableHoverListener={!isLastAdmin}
+                disableFocusListener={!isLastAdmin}
+                disableTouchListener={!isLastAdmin}
+              >
+                <span style={{ display: 'block' }}>
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    color="error"
+                    startIcon={leaving ? <CircularProgress size={16} color="inherit" /> : <ExitToApp />}
+                    disabled={leaving || isLastAdmin}
+                    onClick={handleLeave}
+                    sx={{
+                      borderRadius: '12px',
+                      height: 48,
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      fontSize: '0.9rem',
+                      borderColor: '#ef9a9a',
+                      color: '#c62828',
+                      '&:hover': { bgcolor: '#FEEBEE', borderColor: '#c62828' },
+                    }}
+                  >
+                    {leaving ? 'Leaving…' : 'Exit group'}
+                  </Button>
+                </span>
+              </Tooltip>
+              {isLastAdmin && (
+                <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'text.secondary', textAlign: 'center' }}>
+                  You're the only admin. Promote someone before leaving.
+                </Typography>
+              )}
+            </Box>
+          )
+        })()}
 
         <Box sx={{ pb: 2 }} />
       </Box>
