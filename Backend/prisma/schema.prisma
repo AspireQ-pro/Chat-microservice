@@ -85,6 +85,7 @@ model Message {
   fileStorageKey String?
   fileName    String?
   fileSize    Int?
+  mimeType    String?
   isRead      Boolean  @default(false)
   readAt      DateTime?
   deliveredAt DateTime?

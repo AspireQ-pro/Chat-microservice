@@ -105,7 +105,12 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     }
   }, [message.fileUrl, message.roomId])
 
-  /* ── Fetch media blob for inline rendering (images, audio, video) ── */
+  /* ── Fetch media blob for inline rendering (images, audio, video) ──
+     Auth is required because the backend proxy URL needs a JWT header.
+     The blob is turned into an object URL and used as the src for the
+     inline <img>, <audio>, and <video> elements.
+     Falls back to the canonical proxy URL if the stored fileUrl 404s
+     (handles legacy records where fileUrl differs from the proxy path). ── */
   const loadMedia = useCallback(() => {
     const needsBlob = isImage || isAudio || isVideo
     if (!needsBlob || !message.fileUrl || !token || message.isDeleted) return undefined
@@ -161,8 +166,17 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     return cleanup
   }, [loadMedia])
 
-  /* ── Open file: fetch blob with auth → window.open or OS viewer ── */
+  /* ── Open file via the native platform waterfall ──────────────────────────
+     Delegates entirely to openFile() in utils/fileOpener.js:
+       1. Android bridge  → OS app-chooser intent
+       2. iOS bridge      → share / open-in sheet
+       3. Web Share API   → mobile OS share sheet (iOS 15+, Android Chrome)
+       4. Blob → new tab  → browser renders inline (PDF, image, video, audio,
+                            text) or hands off to the OS handler (docx, zip…)
+     Nothing here auto-downloads. Download is always a separate explicit action.
+  ── */
   const [opening, setOpening] = useState(false)
+
   const handleOpenFile = useCallback(async (e) => {
     e?.stopPropagation()
     if (opening) return
@@ -185,7 +199,9 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     }
   }, [opening, proxyUrl, message.mimeType, message.fileName, message.fileType, token])
 
-  /* ── Open image: use already-loaded blob URL, avoids re-fetch ── */
+  /* ── Open image: if the blob is already loaded, open that object URL
+     directly — avoids a redundant round-trip to the backend.
+     Falls back to the full openFile waterfall if the blob isn't ready. ── */
   const handleOpenImage = useCallback((e) => {
     e?.stopPropagation()
     if (mediaBlobUrl) {
@@ -195,7 +211,9 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     }
   }, [mediaBlobUrl, handleOpenFile])
 
-  /* ── Explicit download: fetch blob → <a download> ── */
+  /* ── Explicit download: fetch blob with auth → <a download> ──────────────
+     Always uses the original fileName so the saved file has the right name
+     and extension. Reuses the already-loaded blob for media types. ── */
   const [downloading, setDownloading] = useState(false)
   const handleDownload = useCallback(async (e) => {
     e?.stopPropagation()
@@ -218,7 +236,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     }
   }, [downloading, proxyUrl, token, message.fileName])
 
-  /* ── context menu ── */
+  /* ── Context menu (right-click desktop / long-press mobile) ── */
   const [menuAnchor, setMenuAnchor] = useState(null)
   const longPressTimer = useRef(null)
 
@@ -241,7 +259,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     if (longPressTimer.current) clearTimeout(longPressTimer.current)
   }, [])
 
-  /* ── inline edit ── */
+  /* ── Inline edit ── */
   const [editing, setEditing]     = useState(false)
   const [editValue, setEditValue] = useState('')
   const editInputRef              = useRef(null)
@@ -268,11 +286,11 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     if (e.key === 'Escape') cancelEdit()
   }
 
-  /* ── delete ── */
-  const handleDeleteForMe       = () => { onDelete?.(message.id, 'me');        closeMenu() }
+  /* ── Delete ── */
+  const handleDeleteForMe       = () => { onDelete?.(message.id, 'me');       closeMenu() }
   const handleDeleteForEveryone = () => { onDelete?.(message.id, 'everyone'); closeMenu() }
 
-  /* ── derived ── */
+  /* ── Derived display values ── */
   const isTextOnly  = !message.fileUrl && message.messageType === 'text'
   const displayName = message.fileName
     || (message.fileUrl ? decodeURIComponent(message.fileUrl.split('/').pop().split('?')[0]) : '')
@@ -313,14 +331,14 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
           userSelect: 'none',
         }}
       >
-        {/* Sender name */}
+        {/* Sender name in group chats */}
         {!message.mine && message.senderName && !message.isDeleted && (
           <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, color: '#7e57c2', mb: 0.25 }}>
             {message.senderName}
           </Typography>
         )}
 
-        {/* ── Deleted ── */}
+        {/* ── Deleted placeholder ── */}
         {message.isDeleted ? (
           <Typography variant="body2" sx={{ fontStyle: 'italic', fontSize: '0.82rem', lineHeight: 1.5 }}>
             🚫 This message was deleted
@@ -372,7 +390,10 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
               </Typography>
             )}
 
-            {/* ── Image ── */}
+            {/* ── Image ──────────────────────────────────────────────────────
+                Blob is loaded with auth and rendered inline as a thumbnail.
+                Clicking opens the image in a new browser tab (native viewer).
+                No dialog, no modal — the browser handles it. ── */}
             {message.fileUrl && isImage && (
               mediaLoading ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
@@ -407,7 +428,9 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
               )
             )}
 
-            {/* ── Audio: inline player using blob URL ── */}
+            {/* ── Audio ──────────────────────────────────────────────────────
+                Inline <audio controls> player using an auth-fetched blob URL.
+                No click-to-open — the player is the interaction. ── */}
             {message.fileUrl && isAudio && (
               mediaLoading ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
@@ -432,7 +455,9 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
               ) : null
             )}
 
-            {/* ── Video: inline player using blob URL ── */}
+            {/* ── Video ──────────────────────────────────────────────────────
+                Inline <video controls> player using an auth-fetched blob URL.
+                No click-to-open — the player is the interaction. ── */}
             {message.fileUrl && isVideo && (
               mediaLoading ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
@@ -458,7 +483,15 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
               ) : null
             )}
 
-            {/* ── Document / generic file card ── */}
+            {/* ── Document / generic file card ───────────────────────────────
+                Clicking the icon or filename runs openFile() directly —
+                no dialog or modal in between.
+                openFile() waterfall:
+                  • Android bridge  → OS app chooser
+                  • iOS bridge      → open-in / share sheet
+                  • Web Share API   → mobile OS share sheet
+                  • Blob → new tab  → browser viewer (PDF, text…) or OS handler
+                Download is a separate explicit button. ── */}
             {message.fileUrl && isFile && (
               <Box
                 sx={{
@@ -470,7 +503,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                   minWidth: 180, maxWidth: 260,
                 }}
               >
-                {/* Click the icon/name → open in viewer */}
+                {/* Click icon or filename → openFile() waterfall (no dialog) */}
                 <Box
                   onClick={handleOpenFile}
                   sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flex: 1, minWidth: 0, cursor: 'pointer' }}
@@ -493,7 +526,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                   </Box>
                 </Box>
 
-                {/* Explicit download — separate action */}
+                {/* Explicit download — always a separate action */}
                 <Tooltip title="Download">
                   <IconButton
                     size="small"
@@ -512,7 +545,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
           </>
         )}
 
-        {/* ── Meta row ── */}
+        {/* ── Meta row (time + delivery ticks) ── */}
         {!message.isDeleted && (
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', mt: 0.3, gap: 0.4, opacity: 0.85 }}>
             {message.editedAt && !editing && (
@@ -529,7 +562,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
         )}
       </Box>
 
-      {/* Failed retry */}
+      {/* Failed — show error + retry link */}
       {failed && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25 }}>
           <Typography variant="caption" sx={{ color: '#c62828', fontSize: '0.65rem' }}>Not delivered</Typography>

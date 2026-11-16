@@ -108,6 +108,7 @@ function ChatPage() {
       onAcceptRequest={handleAcceptRequest}
       onUploadFile={handleUploadFile}
       uploadingFile={uploadingFile}
+      uploadProgress={uploadProgress}
       sendError={sendError}
       sendingFirstMessage={sendingFirstMessage}
       input={input}
