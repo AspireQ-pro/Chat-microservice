@@ -65,6 +65,7 @@ model ChatRoom {
 model ChatRoomMember {
   roomId     String
   userId     String
+  role       String   @default("member")
   joinedAt   DateTime @default(now())
   lastReadAt DateTime?
 
@@ -110,4 +111,16 @@ model MessageDeletion {
 
   @@id([messageId, userId])
   @@index([userId])
+}
+
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  projectId String
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId, projectId])
+  @@index([blockerId, projectId])
+  @@index([blockedId, projectId])
 }

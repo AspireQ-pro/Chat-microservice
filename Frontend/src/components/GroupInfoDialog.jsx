@@ -8,7 +8,7 @@ import {
 import {
   ArrowBackIos, Close, Search, Check,
   CameraAlt, Edit, PersonAdd, PersonRemove, ExitToApp,
-  People, DeleteForever,
+  People, DeleteForever, AdminPanelSettings,
 } from '@mui/icons-material'
 import { useTheme, useMediaQuery } from '@mui/material'
 import { useDispatch } from 'react-redux'
@@ -20,6 +20,7 @@ import {
   leaveGroup,
   uploadGroupAvatar,
   deleteGroup,
+  promoteToAdmin,
 } from '@/provider/chatSlice'
 
 /* ─── helpers ─────────────────────────────────── */
@@ -65,7 +66,12 @@ function GroupInfoDialog({
   /* ── Derived data ── */
   const members = room?.members || []
   const createdById = room?.createdById || null
-  const isOwner = !!(currentUserId && createdById && currentUserId === createdById)
+  // isAdmin: true if the current user has the 'admin' role in this group's members list.
+  // Falls back to createdById check for rooms not yet migrated.
+  const myMembership = members.find((m) => m.userId === currentUserId)
+  const isAdmin = myMembership?.role === 'admin' || !!(currentUserId && createdById && currentUserId === createdById)
+  // Keep isOwner as a named alias used in JSX (now means "is any admin")
+  const isOwner = isAdmin
 
   /* ── View modes: 'info' | 'edit' | 'addMembers' ── */
   const [view, setView] = useState('info')
@@ -90,6 +96,9 @@ function GroupInfoDialog({
   const [leaving, setLeaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [actionError, setActionError] = useState('')
+
+  /* ── Promote to admin state ── */
+  const [promotingId, setPromotingId] = useState(null)
 
   /* ── Min-member warning (shown when removal would leave < 2 non-admin members) ── */
   const [minMemberWarning, setMinMemberWarning] = useState(false)
@@ -213,9 +222,9 @@ function GroupInfoDialog({
 
   const handleRemoveMember = async (userId) => {
     // Count non-admin members that would remain after removal.
-    // The admin (createdById) is never counted toward the 2-member minimum.
+    // Members with role='admin' (or the createdById) do not count toward the minimum.
     const nonAdminAfterRemoval = members.filter(
-      (m) => m.userId !== createdById && m.userId !== userId,
+      (m) => m.role !== 'admin' && m.userId !== createdById && m.userId !== userId,
     ).length
     if (nonAdminAfterRemoval < 2) {
       setMinMemberWarning(true)
@@ -257,6 +266,19 @@ function GroupInfoDialog({
       setActionError(typeof err === 'string' ? err : err?.message || 'Failed to leave group')
     } finally {
       setLeaving(false)
+    }
+  }
+
+  const handlePromoteToAdmin = async (userId) => {
+    setPromotingId(userId)
+    setActionError('')
+    try {
+      await dispatch(promoteToAdmin({ roomId: room.id, userId })).unwrap()
+      setToast('Member promoted to admin')
+    } catch (err) {
+      setActionError(typeof err === 'string' ? err : err?.message || 'Failed to promote member')
+    } finally {
+      setPromotingId(null)
     }
   }
 
@@ -382,7 +404,7 @@ function GroupInfoDialog({
               onClose={() => setMinMemberWarning(false)}
             >
               <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5, fontSize: '0.8rem' }}>
-                A group must have at least 2 members besides the admin.
+                A group must have at least 2 members besides the admins.
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 Add more members or delete the group.
@@ -426,16 +448,24 @@ function GroupInfoDialog({
             {members
               .slice()
               .sort((a, b) => {
-                // Creator first, then others alphabetically
-                if (a.userId === createdById) return -1
-                if (b.userId === createdById) return 1
+                // Admins first (creator first among admins), then others alphabetically
+                const aIsAdmin = a.role === 'admin' || a.userId === createdById
+                const bIsAdmin = b.role === 'admin' || b.userId === createdById
+                if (aIsAdmin !== bIsAdmin) return aIsAdmin ? -1 : 1
+                // Within admins: creator first
+                if (aIsAdmin && bIsAdmin) {
+                  if (a.userId === createdById) return -1
+                  if (b.userId === createdById) return 1
+                }
                 return (a.user?.name || '').localeCompare(b.user?.name || '')
               })
               .map((m, idx) => {
                 const user = m.user || {}
                 const isMe = m.userId === currentUserId
+                const isMemberAdmin = m.role === 'admin' || m.userId === createdById
                 const isCreator = m.userId === createdById
                 const isRemoving = removingId === m.userId
+                const isPromoting = promotingId === m.userId
 
                 return (
                   <Box key={m.userId || idx}>
@@ -467,9 +497,9 @@ function GroupInfoDialog({
                           <Typography variant="body2" fontWeight={600} noWrap>
                             {isMe ? 'You' : (user.name || 'Unknown')}
                           </Typography>
-                          {isCreator && (
+                          {isMemberAdmin && (
                             <Chip
-                              label="Admin"
+                              label={isCreator ? 'Admin' : 'Admin'}
                               size="small"
                               sx={{
                                 height: 18,
@@ -481,7 +511,7 @@ function GroupInfoDialog({
                               }}
                             />
                           )}
-                          {isMe && !isCreator && (
+                          {isMe && !isMemberAdmin && (
                             <Chip
                               label="You"
                               size="small"
@@ -502,20 +532,34 @@ function GroupInfoDialog({
                         </Typography>
                       </Box>
 
-                      {/* Owner can remove non-admin members */}
-                      {isOwner && !isMe && !isCreator && (
-                        <Tooltip title="Remove from group">
-                          <IconButton
-                            size="small"
-                            disabled={isRemoving}
-                            onClick={() => handleRemoveMember(m.userId)}
-                            sx={{ color: '#c62828', '&:hover': { bgcolor: '#FEEBEE' }, flexShrink: 0 }}
-                          >
-                            {isRemoving
-                              ? <CircularProgress size={16} color="inherit" />
-                              : <PersonRemove sx={{ fontSize: 18 }} />}
-                          </IconButton>
-                        </Tooltip>
+                      {/* Admin actions: promote or remove non-admin members */}
+                      {isOwner && !isMe && !isMemberAdmin && (
+                        <Box sx={{ display: 'flex', gap: 0.5, flexShrink: 0 }}>
+                          <Tooltip title="Make Admin">
+                            <IconButton
+                              size="small"
+                              disabled={isPromoting || isRemoving}
+                              onClick={() => handlePromoteToAdmin(m.userId)}
+                              sx={{ color: '#2D4A44', '&:hover': { bgcolor: '#E8F5E9' } }}
+                            >
+                              {isPromoting
+                                ? <CircularProgress size={16} color="inherit" />
+                                : <AdminPanelSettings sx={{ fontSize: 18 }} />}
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Remove from group">
+                            <IconButton
+                              size="small"
+                              disabled={isRemoving || isPromoting}
+                              onClick={() => handleRemoveMember(m.userId)}
+                              sx={{ color: '#c62828', '&:hover': { bgcolor: '#FEEBEE' } }}
+                            >
+                              {isRemoving
+                                ? <CircularProgress size={16} color="inherit" />
+                                : <PersonRemove sx={{ fontSize: 18 }} />}
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
                       )}
                     </Box>
                     {idx < members.length - 1 && <Divider />}

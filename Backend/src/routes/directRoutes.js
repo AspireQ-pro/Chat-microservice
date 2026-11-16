@@ -93,6 +93,24 @@ app.post(
         return res.status(403).json({ error: "Users must belong to this project" });
       }
 
+      // Refuse if either party has blocked the other
+      const blockExists = await prisma.userBlock.findFirst({
+        where: {
+          projectId: req.projectId,
+          OR: [
+            { blockerId: senderId, blockedId: userId2 },
+            { blockerId: userId2, blockedId: senderId },
+          ],
+        },
+        select: { id: true, blockerId: true },
+      });
+      if (blockExists) {
+        const reason = blockExists.blockerId === senderId
+          ? 'You have blocked this user'
+          : 'You cannot message this user';
+        return res.status(403).json({ error: reason });
+      }
+
       const saved = await prisma.$transaction(async (tx) => {
         let room = await tx.chatRoom.findFirst({
           where: {
@@ -265,4 +283,91 @@ app.post(
 // â”€â”€â”€ Upload group avatar (before the room is created) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // POST /api/rooms/group/avatar
 // Authenticated; returns { avatarUrl } which callers pass into POST /rooms/group.
+// ─── Block a user ─────────────────────────────────────────────────────────────
+// POST /api/users/:targetUserId/block
+app.post(`${API_BASE}/users/:targetUserId/block`, authenticateChatJWT, asyncHandler(async (req, res) => {
+  const { targetUserId } = req.params;
+  const blockerId = req.userId;
+
+  if (targetUserId === blockerId) {
+    return sendError(res, 400, 'You cannot block yourself');
+  }
+
+  // Verify the target belongs to the same project
+  const target = await prisma.chatUser.findFirst({
+    where: { id: targetUserId, projectId: req.projectId },
+    select: { id: true },
+  });
+  if (!target) return sendError(res, 404, 'User not found');
+
+  // Upsert: idempotent — blocking an already-blocked user is a no-op
+  await prisma.userBlock.upsert({
+    where: {
+      blockerId_blockedId_projectId: {
+        blockerId,
+        blockedId: targetUserId,
+        projectId: req.projectId,
+      },
+    },
+    create: { blockerId, blockedId: targetUserId, projectId: req.projectId },
+    update: {},
+  });
+
+  // Notify both parties in real-time
+  io.to(`user:${blockerId}`).emit('user_blocked', {
+    blockerId,
+    blockedId: targetUserId,
+  });
+  io.to(`user:${targetUserId}`).emit('user_blocked', {
+    blockerId,
+    blockedId: targetUserId,
+  });
+
+  res.json({ ok: true, blockerId, blockedId: targetUserId });
+}));
+
+// ─── Unblock a user ───────────────────────────────────────────────────────────
+// DELETE /api/users/:targetUserId/block
+app.delete(`${API_BASE}/users/:targetUserId/block`, authenticateChatJWT, asyncHandler(async (req, res) => {
+  const { targetUserId } = req.params;
+  const blockerId = req.userId;
+
+  if (targetUserId === blockerId) {
+    return sendError(res, 400, 'You cannot unblock yourself');
+  }
+
+  const existing = await prisma.userBlock.findUnique({
+    where: {
+      blockerId_blockedId_projectId: {
+        blockerId,
+        blockedId: targetUserId,
+        projectId: req.projectId,
+      },
+    },
+  });
+  if (!existing) return sendError(res, 404, 'Block record not found');
+
+  await prisma.userBlock.delete({
+    where: {
+      blockerId_blockedId_projectId: {
+        blockerId,
+        blockedId: targetUserId,
+        projectId: req.projectId,
+      },
+    },
+  });
+
+  // Notify both parties in real-time
+  io.to(`user:${blockerId}`).emit('user_unblocked', {
+    blockerId,
+    blockedId: targetUserId,
+  });
+  io.to(`user:${targetUserId}`).emit('user_unblocked', {
+    blockerId,
+    blockedId: targetUserId,
+  });
+
+  res.json({ ok: true, blockerId, blockedId: targetUserId });
+}));
+
 };
