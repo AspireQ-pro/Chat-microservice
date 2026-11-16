@@ -698,7 +698,10 @@ const chatSlice = createSlice({
       const updateList = (list) => {
         if (!list) return;
         list.forEach((m) => {
-          if (m.mine && (m.status === "sending" || m.status === "sent")) {
+          // Only advance forward: sending/sent → delivered.
+          // Never downgrade a message that's already delivered or read.
+          if (!m.mine || m.status === "delivered" || m.status === "read") return;
+          if (m.status === "sending" || m.status === "sent") {
             m.status = "delivered";
             if (deliveredAt) m.deliveredAt = deliveredAt;
           }
@@ -720,7 +723,12 @@ const chatSlice = createSlice({
         const readers = new Set(m.readBy || []);
         readers.add(readerId);
         m.readBy = [...readers];
-        if (m.recipientCount > 0 && readers.size >= m.recipientCount) {
+        // recipientCount may still be 0/undefined if the message_ack hasn't
+        // arrived yet (race condition). Fall back to treating any read event
+        // as sufficient to mark "read" when count is unknown (direct chat),
+        // or require all recipients when count is known (groups).
+        const count = m.recipientCount ?? 0;
+        if (count === 0 || readers.size >= count) {
           m.status = "read";
         }
       });
