@@ -1005,6 +1005,24 @@ const chatSlice = createSlice({
           state.pagination[roomId].loadingOlder = false;
       });
 
+    // Immediately reflect block/unblock in Redux so the UI updates without
+    // waiting for the socket event (which may be delayed or missed).
+    builder
+      .addCase(blockUser.fulfilled, (state, { meta }) => {
+        const targetUserId = meta.arg;
+        const idx = state.rooms.findIndex(
+          (r) => !r.isGroup && r.members?.some((m) => m.userId === targetUserId),
+        );
+        if (idx !== -1) state.rooms[idx].blockedByMe = true;
+      })
+      .addCase(unblockUser.fulfilled, (state, { meta }) => {
+        const targetUserId = meta.arg;
+        const idx = state.rooms.findIndex(
+          (r) => !r.isGroup && r.members?.some((m) => m.userId === targetUserId),
+        );
+        if (idx !== -1) state.rooms[idx].blockedByMe = false;
+      });
+
     builder.addCase(markMessagesRead.fulfilled, (state, { payload }) => {
       const { roomId } = payload;
       state.unreadCounts[roomId] = 0;
