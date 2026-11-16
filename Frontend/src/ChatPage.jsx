@@ -50,15 +50,17 @@ function ChatPage() {
     sendError,
     sendingFirstMessage,
     uploadingFile,
+    uploadProgress,
     openGroupDialog,
     closeGroupDialog,
     toggleGroupMember,
     handleCreateGroup,
     handleEditMessage,
     handleDeleteMessage,
+    handleBlockUser,
+    handleUnblockUser,
     socketConnected,
   } = useChatHandler();
-
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
   const [groupInfoRoomId, setGroupInfoRoomId] = useState(null);
 
@@ -119,6 +121,8 @@ function ChatPage() {
       onViewMembers={() => openGroupInfo(activeRoom)}
       onEditMessage={handleEditMessage}
       onDeleteMessage={handleDeleteMessage}
+      onBlockUser={handleBlockUser}
+      onUnblockUser={handleUnblockUser}
       socketConnected={socketConnected}
     />
   );

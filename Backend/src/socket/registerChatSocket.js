@@ -269,15 +269,23 @@ io.on("connection", (socket) => {
         }
 
         // If the group is restricted to admin-only messaging, reject non-admins.
-        // Allow both global admins (via role) and the group creator.
+        // Allow: global admins (via ChatUser.role), the group creator, or any
+        // member promoted to admin (ChatRoomMember.role === 'admin').
         if (room.isGroup && room.adminOnlyMessages) {
           const isCreator = room.createdById === senderId;
           if (!isCreator) {
-            const chatUser = await prisma.chatUser.findFirst({
-              where: { id: senderId, projectId: socket.projectId },
-              select: { role: true },
-            });
-            if (!isAdminRole(chatUser?.role)) {
+            const [chatUser, membership] = await Promise.all([
+              prisma.chatUser.findFirst({
+                where: { id: senderId, projectId: socket.projectId },
+                select: { role: true },
+              }),
+              prisma.chatRoomMember.findUnique({
+                where: { roomId_userId: { roomId, userId: senderId } },
+                select: { role: true },
+              }),
+            ]);
+            const isGroupAdmin = membership?.role === 'admin';
+            if (!isGroupAdmin && !isAdminRole(chatUser?.role)) {
               socket.emit("message_ack", {
                 clientId: clientId || null,
                 status: "failed",
@@ -307,6 +315,34 @@ io.on("connection", (socket) => {
             error: "Attachment upload was not completed",
           });
           return socket.emit("error", { message: "Attachment upload was not completed" });
+        }
+
+        // For direct chats, check if either party has blocked the other.
+        if (!room.isGroup) {
+          const otherMemberId = members.find((m) => m.userId !== senderId)?.userId || null;
+          if (otherMemberId) {
+            const blockExists = await prisma.userBlock.findFirst({
+              where: {
+                projectId: socket.projectId,
+                OR: [
+                  { blockerId: senderId, blockedId: otherMemberId },
+                  { blockerId: otherMemberId, blockedId: senderId },
+                ],
+              },
+              select: { id: true, blockerId: true },
+            });
+            if (blockExists) {
+              const reason = blockExists.blockerId === senderId
+                ? 'You have blocked this user'
+                : 'This user has blocked you';
+              socket.emit("message_ack", {
+                clientId: clientId || null,
+                status: "failed",
+                error: reason,
+              });
+              return socket.emit("error", { message: reason, clientId: clientId || null });
+            }
+          }
         }
 
         if (!room.isGroup && room.directStatus === "pending") {

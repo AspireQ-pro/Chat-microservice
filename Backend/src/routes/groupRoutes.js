@@ -10,6 +10,16 @@ module.exports = function registerGroupRoutes(context) {
     parseFeatureFlag, resolveChatCapabilities, getProjectPermissions,
     crypto, jwt, path, io,
   } = context;
+
+// Returns true if the given userId is an admin of the given room.
+// Admins have role='admin' in ChatRoomMember (set at creation or via promotion).
+async function isGroupAdmin(roomId, userId) {
+  const membership = await prisma.chatRoomMember.findUnique({
+    where: { roomId_userId: { roomId, userId } },
+    select: { role: true },
+  });
+  return membership?.role === 'admin';
+}
 app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
   const { allowGroupChat } = await getProjectPermissions(req.projectId, req);
   if (!allowGroupChat) {
@@ -71,7 +81,12 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
         avatarUrl: null,
         avatarStorageKey: safeAvatarStorageKey,
         description: safeDescription,
-        members: { create: allIds.map((userId) => ({ userId })) },
+        members: {
+          create: allIds.map((userId) => ({
+            userId,
+            role: userId === creatorId ? 'admin' : 'member',
+          })),
+        },
       },
       include: { members: { include: { user: true } } },
     });
@@ -143,7 +158,7 @@ app.delete(`${API_BASE}/rooms/:roomId/members/me`, authenticateChatJWT, async (r
   }
 });
 
-// ─── Update group info (name / description / avatar) — owner only ─────────────
+// ─── Update group info (name / description / avatar) — any group admin ───────
 // PATCH /api/rooms/:roomId
 app.patch(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
@@ -152,9 +167,10 @@ app.patch(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (
   });
   if (!room) return sendError(res, 404, 'Group not found');
 
-  // Only the group creator (stored on the room) may update group info
-  const creatorId = room.createdById;
-  if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can edit group info');
+  // Any group admin may update group info
+  if (!(await isGroupAdmin(roomId, req.userId))) {
+    return sendError(res, 403, 'Only a group admin can edit group info');
+  }
 
   const { name, description, avatarUrl } = req.body;
   const updateData = {};
@@ -220,7 +236,7 @@ app.patch(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (
   res.json(await serializeRoomForUser(updated, req.userId));
 }));
 
-// ─── Add members to a group — owner only ──────────────────────────────────────
+// ─── Add members to a group — any group admin ─────────────────────────────────
 // POST /api/rooms/:roomId/members
 app.post(`${API_BASE}/rooms/:roomId/members`, authenticateChatJWT, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
@@ -230,8 +246,9 @@ app.post(`${API_BASE}/rooms/:roomId/members`, authenticateChatJWT, asyncHandler(
   });
   if (!room) return sendError(res, 404, 'Group not found');
 
-  const creatorId = room.createdById;
-  if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can add members');
+  if (!(await isGroupAdmin(roomId, req.userId))) {
+    return sendError(res, 403, 'Only a group admin can add members');
+  }
 
   const { memberIds } = req.body;
   if (!Array.isArray(memberIds) || !memberIds.length) {
@@ -268,33 +285,34 @@ app.post(`${API_BASE}/rooms/:roomId/members`, authenticateChatJWT, asyncHandler(
   res.json(await serializeRoomForUser(updatedRoom, req.userId));
 }));
 
-// ─── Remove a member from a group — owner only ────────────────────────────────
+// ─── Remove a member from a group — any group admin ──────────────────────────
 // DELETE /api/rooms/:roomId/members/:userId
 app.delete(`${API_BASE}/rooms/:roomId/members/:targetUserId`, authenticateChatJWT, asyncHandler(async (req, res) => {
   const { roomId, targetUserId } = req.params;
   const room = await prisma.chatRoom.findFirst({
     where: { id: roomId, projectId: req.projectId, isGroup: true },
-    include: { members: { select: { userId: true } } },
+    include: { members: { select: { userId: true, role: true } } },
   });
   if (!room) return sendError(res, 404, 'Group not found');
 
-  const creatorId = room.createdById;
-  if (creatorId !== req.userId) return sendError(res, 403, 'Only the group creator can remove members');
+  if (!(await isGroupAdmin(roomId, req.userId))) {
+    return sendError(res, 403, 'Only a group admin can remove members');
+  }
   if (targetUserId === req.userId) return sendError(res, 400, 'Use the leave endpoint to remove yourself');
 
   const isMember = room.members.some((m) => m.userId === targetUserId);
   if (!isMember) return sendError(res, 404, 'User is not a member of this group');
 
-  // Count non-admin members after the proposed removal.
-  // The admin (createdById) must never count toward the 2-member minimum.
+  // Count non-admin members that would remain after removal.
+  // Admins do not count toward the 2-member minimum.
   const nonAdminAfterRemoval = room.members.filter(
-    (m) => m.userId !== creatorId && m.userId !== targetUserId,
+    (m) => m.role !== 'admin' && m.userId !== targetUserId,
   ).length;
   if (nonAdminAfterRemoval < 2) {
     return sendError(
       res,
       400,
-      'A group must have at least 2 members besides the admin. Add more members or delete the group.',
+      'A group must have at least 2 members besides the admins. Add more members or delete the group.',
     );
   }
 
@@ -313,7 +331,7 @@ app.delete(`${API_BASE}/rooms/:roomId/members/:targetUserId`, authenticateChatJW
   res.json({ ok: true });
 }));
 
-// ─── Delete an entire group — owner only ──────────────────────────────────────
+// ─── Delete an entire group — any group admin ─────────────────────────────────
 // DELETE /api/rooms/:roomId
 app.delete(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async (req, res) => {
   const { roomId } = req.params;
@@ -322,7 +340,9 @@ app.delete(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async 
     include: { members: { select: { userId: true } } },
   });
   if (!room) return sendError(res, 404, 'Group not found');
-  if (room.createdById !== req.userId) return sendError(res, 403, 'Only the group creator can delete the group');
+  if (!(await isGroupAdmin(roomId, req.userId))) {
+    return sendError(res, 403, 'Only a group admin can delete the group');
+  }
 
   const allMemberIds = room.members.map((m) => m.userId);
 
@@ -336,4 +356,55 @@ app.delete(`${API_BASE}/rooms/:roomId`, authenticateChatJWT, asyncHandler(async 
 
   res.json({ ok: true });
 }));
+
+// ─── Promote a member to admin — any group admin ──────────────────────────────
+// PATCH /api/rooms/:roomId/members/:targetUserId/role
+app.patch(`${API_BASE}/rooms/:roomId/members/:targetUserId/role`, authenticateChatJWT, asyncHandler(async (req, res) => {
+  const { roomId, targetUserId } = req.params;
+  const { role } = req.body;
+
+  if (role !== 'admin') {
+    return sendError(res, 400, 'Only promotion to admin is supported');
+  }
+
+  const room = await prisma.chatRoom.findFirst({
+    where: { id: roomId, projectId: req.projectId, isGroup: true },
+    include: { members: { include: { user: true } } },
+  });
+  if (!room) return sendError(res, 404, 'Group not found');
+
+  // Caller must be a group admin
+  if (!(await isGroupAdmin(roomId, req.userId))) {
+    return sendError(res, 403, 'Only a group admin can promote members');
+  }
+
+  const targetMembership = room.members.find((m) => m.userId === targetUserId);
+  if (!targetMembership) return sendError(res, 404, 'User is not a member of this group');
+  if (targetMembership.role === 'admin') return sendError(res, 400, 'User is already an admin');
+
+  await prisma.chatRoomMember.update({
+    where: { roomId_userId: { roomId, userId: targetUserId } },
+    data: { role: 'admin' },
+  });
+
+  // Re-fetch the room so members reflect the updated role
+  const updatedRoom = await prisma.chatRoom.findFirst({
+    where: { id: roomId },
+    include: { members: { include: { user: true } } },
+  });
+
+  // Notify all members in real-time so the UI updates immediately
+  for (const m of updatedRoom.members) {
+    const memberRoom = await serializeRoomForUser(updatedRoom, m.userId);
+    io.to(`user:${m.userId}`).emit('member_promoted', {
+      roomId,
+      userId: targetUserId,
+      role: 'admin',
+      room: memberRoom,
+    });
+  }
+
+  res.json(await serializeRoomForUser(updatedRoom, req.userId));
+}));
+
 };

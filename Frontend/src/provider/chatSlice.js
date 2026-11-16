@@ -464,6 +464,58 @@ export const deleteGroup = createAsyncThunk(
   },
 );
 
+export const promoteToAdmin = createAsyncThunk(
+  'chat/promoteToAdmin',
+  async ({ roomId, userId }, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/rooms/${roomId}/members/${userId}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(getState) },
+        body: JSON.stringify({ role: 'admin' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to promote member');
+      return data; // full updated room
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const blockUser = createAsyncThunk(
+  'chat/blockUser',
+  async (targetUserId, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/users/${targetUserId}/block`, {
+        method: 'POST',
+        headers: authHeaders(getState),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to block user');
+      return data; // { ok, blockerId, blockedId }
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const unblockUser = createAsyncThunk(
+  'chat/unblockUser',
+  async (targetUserId, { getState, rejectWithValue }) => {
+    try {
+      const res = await fetch(`${API_BASE}/users/${targetUserId}/block`, {
+        method: 'DELETE',
+        headers: authHeaders(getState),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to unblock user');
+      return data; // { ok, blockerId, blockedId }
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 export const markMessagesRead = createAsyncThunk(
   "chat/markMessagesRead",
   async ({ roomId }, { getState }) => {
@@ -718,6 +770,37 @@ const chatSlice = createSlice({
         state.rooms[idx].members = state.rooms[idx].members.filter(
           (m) => m.userId !== userId
         );
+      }
+    },
+    memberPromotedToAdmin(state, { payload }) {
+      // payload: { roomId, userId, role, room }
+      // Replace the full room so member roles are in sync
+      const room = payload?.room;
+      if (!room?.id) return;
+      const idx = state.rooms.findIndex((r) => r.id === room.id);
+      if (idx !== -1) {
+        state.rooms[idx] = { ...state.rooms[idx], ...room };
+      }
+    },
+    // Update blockedByMe / blockedByThem on the direct room when a block/unblock
+    // event arrives via socket (user_blocked / user_unblocked).
+    roomBlockStatusUpdated(state, { payload }) {
+      const { blockerId, blockedId, blocked } = payload;
+      // Find the direct room that contains both parties
+      const idx = state.rooms.findIndex(
+        (r) =>
+          !r.isGroup &&
+          r.members?.some((m) => m.userId === blockerId) &&
+          r.members?.some((m) => m.userId === blockedId),
+      );
+      if (idx === -1) return;
+      const myId = payload.currentUserId;
+      if (myId === blockerId) {
+        // I am the blocker
+        state.rooms[idx].blockedByMe = blocked;
+      } else {
+        // The other party is the blocker
+        state.rooms[idx].blockedByThem = blocked;
       }
     },
     messageEdited(state, { payload }) {
@@ -981,6 +1064,7 @@ export const {
   groupCreated,
   groupInfoUpdated,
   memberRemovedFromGroup,
+  memberPromotedToAdmin,
   messageEdited,
   messageDeleted,
   messageDeletedForMe,
@@ -989,6 +1073,7 @@ export const {
   userOffline,
   removeRoom,
   clearChat,
+  roomBlockStatusUpdated,
 } = chatSlice.actions;
 
 export default chatSlice.reducer;

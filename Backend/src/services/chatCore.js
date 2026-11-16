@@ -155,12 +155,48 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
       return { ...member, user: publicUser };
     }));
 
+    // For direct (1-to-1) rooms, include block status so the client can show
+    // the blocked/blocking state without an extra round-trip.
+    let blockedByMe = false;
+    let blockedByThem = false;
+    if (!room.isGroup && members && members.length === 2) {
+      const otherId = members.find((m) => m.userId !== userId)?.userId || null;
+      if (otherId) {
+        const [myBlock, theirBlock] = await Promise.all([
+          prisma.userBlock.findUnique({
+            where: {
+              blockerId_blockedId_projectId: {
+                blockerId: userId,
+                blockedId: otherId,
+                projectId: room.projectId,
+              },
+            },
+            select: { id: true },
+          }),
+          prisma.userBlock.findUnique({
+            where: {
+              blockerId_blockedId_projectId: {
+                blockerId: otherId,
+                blockedId: userId,
+                projectId: room.projectId,
+              },
+            },
+            select: { id: true },
+          }),
+        ]);
+        blockedByMe = !!myBlock;
+        blockedByThem = !!theirBlock;
+      }
+    }
+
     return {
       ...publicRoom,
       ...(members ? { members } : {}),
       lastMessagePreview: decryptContent(room.lastMessagePreview),
       unreadCount,
       createdById,
+      blockedByMe,
+      blockedByThem,
     };
   }
 

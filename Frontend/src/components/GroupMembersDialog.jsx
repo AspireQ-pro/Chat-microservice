@@ -45,6 +45,7 @@ function GroupMembersDialog({ open, onClose, room, currentUserId, onLeave }) {
           {members.map((m, idx) => {
             const user      = m.user || {}
             const isMe      = m.userId === currentUserId
+            const isAdmin   = m.role === 'admin'
             const avatar    = user.name?.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2) || '?'
             return (
               <Box key={m.userId || idx}>
@@ -57,7 +58,10 @@ function GroupMembersDialog({ open, onClose, room, currentUserId, onLeave }) {
                       <Typography variant="body2" fontWeight={500} noWrap>
                         {user.name || 'Unknown'}
                       </Typography>
-                      {isMe && (
+                      {isAdmin && (
+                        <Chip label="Admin" size="small" sx={{ height: 16, fontSize: '0.6rem', bgcolor: '#e8f5e9', color: '#2e7d32', fontWeight: 700 }} />
+                      )}
+                      {isMe && !isAdmin && (
                         <Chip label="You" size="small" sx={{ height: 16, fontSize: '0.6rem', bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 700 }} />
                       )}
                     </Box>

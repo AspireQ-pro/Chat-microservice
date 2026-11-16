@@ -35,6 +35,10 @@ import {
   fetchOlderMessages,
   createGroup,
   markMessagesRead,
+  memberPromotedToAdmin,
+  roomBlockStatusUpdated,
+  blockUser,
+  unblockUser,
 } from "@/provider/chatSlice";
 
 const API =
@@ -344,6 +348,18 @@ export function useChatHandler() {
         dispatch(memberRemovedFromGroup(p));
       }
     };
+    const onMemberPromoted = (p) => {
+      if (!p?.roomId || !p?.userId) return;
+      dispatch(memberPromotedToAdmin(p));
+    };
+    const onUserBlocked = (p) => {
+      if (!p?.blockerId || !p?.blockedId) return;
+      dispatch(roomBlockStatusUpdated({ ...p, blocked: true, currentUserId: myChatId }));
+    };
+    const onUserUnblocked = (p) => {
+      if (!p?.blockerId || !p?.blockedId) return;
+      dispatch(roomBlockStatusUpdated({ ...p, blocked: false, currentUserId: myChatId }));
+    };
     const onMessageEdited = (p) => {
       if (!p?.message) return;
       dispatch(messageEdited(p));
@@ -369,6 +385,9 @@ export function useChatHandler() {
     socket.on("group_created", onGroupCreated);
     socket.on("group_updated", onGroupUpdated);
     socket.on("member_removed", onMemberRemoved);
+    socket.on("member_promoted", onMemberPromoted);
+    socket.on("user_blocked", onUserBlocked);
+    socket.on("user_unblocked", onUserUnblocked);
     socket.on("message_edited", onMessageEdited);
     socket.on("message_deleted", onMessageDeleted);
     socket.on("message_deleted_for_me", onMessageDeletedForMe);
@@ -388,6 +407,9 @@ export function useChatHandler() {
       socket.off("group_created", onGroupCreated);
       socket.off("group_updated", onGroupUpdated);
       socket.off("member_removed", onMemberRemoved);
+      socket.off("member_promoted", onMemberPromoted);
+      socket.off("user_blocked", onUserBlocked);
+      socket.off("user_unblocked", onUserUnblocked);
       socket.off("message_edited", onMessageEdited);
       socket.off("message_deleted", onMessageDeleted);
       socket.off("message_deleted_for_me", onMessageDeletedForMe);
@@ -817,6 +839,20 @@ export function useChatHandler() {
     socket.emit("edit_message", { messageId, content: newContent });
   }, []);
 
+  const handleBlockUser = useCallback(
+    async (targetUserId) => {
+      await dispatch(blockUser(targetUserId)).unwrap();
+    },
+    [dispatch],
+  );
+
+  const handleUnblockUser = useCallback(
+    async (targetUserId) => {
+      await dispatch(unblockUser(targetUserId)).unwrap();
+    },
+    [dispatch],
+  );
+
   const handleDeleteMessage = useCallback(async (messageId, scope) => {
     const deleteScope = scope === "me" ? "me" : "everyone";
 
@@ -896,6 +932,8 @@ export function useChatHandler() {
     handleCreateGroup,
     handleEditMessage,
     handleDeleteMessage,
+    handleBlockUser,
+    handleUnblockUser,
     socketConnected,
   };
 }
