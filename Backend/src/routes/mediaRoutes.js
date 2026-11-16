@@ -77,6 +77,13 @@ app.post(
       ? path.basename(req.file.originalname).replace(/[^\w.\-]/g, "_").slice(0, 255)
       : "";
     const { extension, fileType } = getUploadType(mime, originalName);
+    // Enforce per-type size limits
+    const MAX_BY_TYPE = { image: 7 * 1024 * 1024, video: 30 * 1024 * 1024 };
+    const limit = MAX_BY_TYPE[fileType] ?? (100 * 1024 * 1024);
+    if (req.file.size > limit) {
+      const mb = Math.round(limit / (1024 * 1024));
+      return res.status(413).json({ error: `${fileType === 'image' ? 'Images' : 'Videos'} must be ${mb} MB or smaller.` });
+    }
     const filename = `${crypto.randomUUID()}${extension}`;
     const category = req.room.isGroup ? "groups" : "direct";
     const key = mediaKey(req.projectId, category, req.room.id, filename);

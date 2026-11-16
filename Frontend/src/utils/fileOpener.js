@@ -1,20 +1,30 @@
 /**
  * fileOpener.js
  *
- * Platform-aware open / share logic for chat attachments.
+ * Platform-aware open / share / download logic for chat attachments.
  *
- * Priority order:
- *  1. Android native bridge  — app-chooser intent (all file types)
- *  2. iOS native bridge      — share / open-in sheet (all file types)
- *  3. Web Share API          — iOS Safari 15+, Android Chrome, some desktops (all file types)
- *  4. Blob URL open          — fetch with auth → blob: URL → window.open
- *                              • Browser-renderable types: renders inline (PDF, images, video, audio, text)
- *                              • Everything else: browser hands off to OS default app (docx, xlsx, zip…)
+ * Strategy by platform:
  *
- * Nothing here auto-downloads — download is always an explicit user action via triggerDownload().
+ *  Native app (Android/iOS bridge)
+ *    → Pass the URL directly to the OS — the app handles it natively.
+ *
+ *  Mobile browser (iOS Safari, Android Chrome) — no bridge
+ *    → Try Web Share API with the file blob (opens the OS share/open sheet).
+ *    → If Web Share isn't available or can't share this file type,
+ *      fall back to <a download> — reliable on all mobile browsers.
+ *    → Never use window.open() on mobile: it fires inside an async chain
+ *      (after await fetch), so the browser treats it as a popup and blocks it.
+ *
+ *  Desktop browser
+ *    → Try Web Share API (supported on some desktops like macOS Safari/Chrome).
+ *    → Otherwise fetch the blob with auth and call window.open(blob:) in a
+ *      new tab. For browser-renderable types this renders inline; for
+ *      everything else the browser hands it to the OS default app.
+ *
+ * Download is always an explicit action — nothing auto-downloads.
  */
 
-import { hasAndroidBridge, hasIOSBridge, canWebShare } from './platform'
+import { hasAndroidBridge, hasIOSBridge, canWebShare, isMobileBrowser } from './platform'
 
 const API =
   typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL
@@ -22,7 +32,7 @@ const API =
     : (typeof import.meta !== 'undefined' && import.meta.env?.DEV ? 'http://localhost:5000' : '')
 const API_ORIGIN = API ? new URL(API, window.location.href).origin : window.location.origin
 
-// MIMEs the browser can render inline (shown in the browser tab itself).
+// MIMEs the browser can render inline in a new tab.
 const BROWSER_RENDERABLE = new Set([
   'application/pdf',
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
@@ -31,9 +41,8 @@ const BROWSER_RENDERABLE = new Set([
   'text/plain', 'text/csv', 'text/html',
 ])
 
-// Extension → MIME fallback when server sends application/octet-stream.
+// Extension → MIME for files the server reports as application/octet-stream.
 const EXT_MIME = {
-  // Documents
   pdf:  'application/pdf',
   doc:  'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -43,42 +52,28 @@ const EXT_MIME = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   txt:  'text/plain',
   csv:  'text/csv',
-  // Images
   jpg: 'image/jpeg', jpeg: 'image/jpeg',
   png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-  // Video
   mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo',
-  // Audio
   mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', m4a: 'audio/mp4', flac: 'audio/flac',
-  // Archives
   zip: 'application/zip', rar: 'application/x-rar-compressed',
-  '7z': 'application/x-7z-compressed', tar: 'application/x-tar',
-  gz:  'application/gzip',
+  '7z': 'application/x-7z-compressed', tar: 'application/x-tar', gz: 'application/gzip',
 }
 
-/**
- * Resolve a reliable MIME from server-reported type + filename extension.
- */
 export function resolveMime(mimeType, fileName) {
   if (mimeType && mimeType !== 'application/octet-stream') return mimeType
   const ext = (fileName || '').split('.').pop().toLowerCase()
   return EXT_MIME[ext] || 'application/octet-stream'
 }
 
-/**
- * True if the browser can render this MIME directly in a tab.
- */
 export function isBrowserRenderable(mimeType, fileName) {
   const mime = resolveMime(mimeType, fileName)
   if (BROWSER_RENDERABLE.has(mime)) return true
   return /^(image|video|audio)\//.test(mime)
 }
 
-/**
- * Fetch with JWT auth header when the URL points to our own backend.
- * S3 presigned URLs carry auth in query params — skip the header for those.
- */
-function authFetch(url, token) {
+/** Fetch with JWT only for same-origin backend URLs. */
+async function authFetch(url, token) {
   let headers = {}
   try {
     if (token && new URL(url, window.location.href).origin === API_ORIGIN) {
@@ -91,22 +86,61 @@ function authFetch(url, token) {
 }
 
 /**
- * Open a file using the best available strategy for this platform.
- * Works for ALL file types — browser-renderable ones open inline,
- * everything else is handed to the OS default application.
+ * Fetch the file blob once, then try Web Share.
+ * Returns the blob so callers can reuse it for download fallback.
+ * @returns {{ blob: Blob|null, shared: boolean }}
+ */
+async function tryWebShare(url, token, fileName, mime) {
+  try {
+    const res = await authFetch(url, token)
+    if (!res.ok) return { blob: null, shared: false }
+    const blob = await res.blob()
+    const shareFile = new File([blob], fileName || 'file', { type: mime })
+    if (navigator.canShare({ files: [shareFile] })) {
+      await navigator.share({ files: [shareFile], title: fileName || 'File' })
+      return { blob, shared: true }
+    }
+    return { blob, shared: false }
+  } catch (err) {
+    if (err?.name === 'AbortError') return { blob: null, shared: true } // dismissed = handled
+    console.warn('[fileOpener] Web Share failed', err)
+    return { blob: null, shared: false }
+  }
+}
+
+/**
+ * Synchronously trigger a download from a blob.
+ * Works on all mobile browsers because the anchor click is not inside an async chain.
+ */
+function blobToDownload(blob, mime, fileName) {
+  const typedBlob = new Blob([blob], { type: mime })
+  const blobUrl = URL.createObjectURL(typedBlob)
+  const a = document.createElement('a')
+  a.href = blobUrl
+  a.download = fileName || 'file'
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
+}
+
+/**
+ * Open a file. Strategy varies by platform — see module comment at the top.
  *
  * @param {object}      opts
- * @param {string}      opts.url       - Backend proxy URL (https:)
+ * @param {string}      opts.url       - Backend proxy URL
  * @param {string}      opts.fileName  - Original filename e.g. "report.xlsx"
  * @param {string}      opts.mimeType  - MIME type from the server
  * @param {string}      opts.fileType  - Simplified type ('image'|'video'|'audio'|'pdf'|'file')
- * @param {string|null} [opts.token]   - JWT bearer token for auth-protected URLs
+ * @param {string|null} [opts.token]   - JWT bearer token
  * @returns {Promise<{ handled: boolean }>}
  */
 export async function openFile({ url, fileName, mimeType, fileType, token = null }) {
   const mime = resolveMime(mimeType, fileName)
+  const mobile = isMobileBrowser()
 
-  // ── 1. Android native bridge — hands URL to the OS app-chooser ───────────
+  // ── 1. Android native bridge ──────────────────────────────────────────────
   if (hasAndroidBridge()) {
     try {
       window.AndroidBridge.openFile(url, mime, fileName || 'file')
@@ -116,14 +150,11 @@ export async function openFile({ url, fileName, mimeType, fileType, token = null
     }
   }
 
-  // ── 2. iOS native bridge — triggers the iOS share / open-in sheet ─────────
+  // ── 2. iOS native bridge ──────────────────────────────────────────────────
   if (hasIOSBridge()) {
     try {
       window.webkit.messageHandlers.chatBridge.postMessage({
-        type: 'openFile',
-        url,
-        mimeType: mime,
-        fileName: fileName || 'file',
+        type: 'openFile', url, mimeType: mime, fileName: fileName || 'file',
       })
       return { handled: true }
     } catch (err) {
@@ -131,58 +162,88 @@ export async function openFile({ url, fileName, mimeType, fileType, token = null
     }
   }
 
-  // ── 3. Web Share API — works on mobile browsers and some desktop browsers ─
-  //    Fetches the blob first (needed for auth), then shares via the OS sheet.
-  //    This covers ALL file types including docx, xlsx, zip, etc.
+  // ── 3. Web Share API ──────────────────────────────────────────────────────
+  //    Tried on both mobile and desktop when available.
+  //    On mobile this opens the OS "Open With" / share sheet — the user picks their app.
   if (canWebShare()) {
+    const { blob, shared } = await tryWebShare(url, token, fileName, mime)
+    if (shared) return { handled: true }
+
+    // Web Share didn't fire but we already have the blob — use it.
+    if (blob && mobile) {
+      // On mobile: window.open is unreliable inside async chains, so download instead.
+      // The user can then open from their downloads in the correct app.
+      blobToDownload(blob, mime, fileName)
+      return { handled: true }
+    }
+
+    // On desktop with blob: fall through to window.open below, reusing the blob.
+    if (blob) {
+      const typedBlob = new Blob([blob], { type: mime })
+      const blobUrl = URL.createObjectURL(typedBlob)
+      const tab = window.open(blobUrl, '_blank', 'noopener,noreferrer')
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+      if (tab) return { handled: true }
+      URL.revokeObjectURL(blobUrl)
+    }
+  }
+
+  // ── 4. Mobile browser without Web Share API ───────────────────────────────
+  //    Fetch the blob and trigger a download. This is the most reliable
+  //    fallback on mobile — the file lands in the Downloads folder and
+  //    the user opens it from there with their preferred app.
+  if (mobile) {
     try {
       const res = await authFetch(url, token)
       if (res.ok) {
         const blob = await res.blob()
-        const shareFile = new File([blob], fileName || 'file', { type: mime })
-        if (navigator.canShare({ files: [shareFile] })) {
-          await navigator.share({ files: [shareFile], title: fileName || 'File' })
-          return { handled: true }
-        }
+        blobToDownload(blob, mime, fileName)
+        return { handled: true }
       }
     } catch (err) {
-      if (err?.name === 'AbortError') return { handled: true } // user dismissed — that's fine
-      console.warn('[fileOpener] Web Share API failed', err)
-      // fall through to blob open
+      console.warn('[fileOpener] mobile download fallback failed', err)
     }
+    return { handled: false }
   }
 
-  // ── 4. Fetch blob → window.open in a new tab ──────────────────────────────
-  //    For browser-renderable types: renders inline in the tab.
-  //    For everything else (docx, xlsx, zip, …): the browser triggers the OS
-  //    "open with" dialog or downloads via the system handler — the user gets
-  //    to choose their app. This is the WhatsApp-style behaviour on desktop.
+  // ── 5. Desktop — fetch blob → window.open ────────────────────────────────
+  //    Renderable types open inline; others trigger the OS default handler.
   try {
     const res = await authFetch(url, token)
     if (res.ok) {
       const blob = await res.blob()
-      // Use the resolved MIME so the browser/OS knows what type it is
       const typedBlob = new Blob([blob], { type: mime })
       const blobUrl = URL.createObjectURL(typedBlob)
-      const newTab = window.open(blobUrl, '_blank', 'noopener,noreferrer')
-      // Revoke after a generous delay so the tab has time to read the data
+      const tab = window.open(blobUrl, '_blank', 'noopener,noreferrer')
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
-      if (newTab) return { handled: true }
-      // Popup blocked — revoke immediately and signal failure
+      if (tab) return { handled: true }
       URL.revokeObjectURL(blobUrl)
     }
   } catch (err) {
-    console.warn('[fileOpener] blob open failed', err)
+    console.warn('[fileOpener] desktop blob open failed', err)
   }
 
   return { handled: false }
 }
 
 /**
- * Trigger an explicit browser download.
+ * Explicit download triggered by the Download button.
+ * Fetches the blob with auth and fires <a download>.
  *
- * @param {string} blobUrl  - object URL (blob:)
- * @param {string} fileName - desired save-as filename
+ * @param {string}      url
+ * @param {string}      fileName
+ * @param {string|null} token
+ */
+export async function downloadFile(url, fileName, token = null) {
+  const res = await authFetch(url, token)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const blob = await res.blob()
+  blobToDownload(blob, blob.type || 'application/octet-stream', fileName)
+}
+
+/**
+ * Trigger a browser download from an already-created blob URL.
+ * Kept for callers that already have a blob URL.
  */
 export function triggerDownload(blobUrl, fileName) {
   const a = document.createElement('a')

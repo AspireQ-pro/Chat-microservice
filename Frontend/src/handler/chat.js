@@ -630,16 +630,17 @@ export function useChatHandler() {
       return;
     }
 
-    // ── Per-type size limits (enforced before any upload attempt) ──────────
-    const IMAGE_MAX = 16  * 1024 * 1024  //  16 MB — matches WhatsApp
-    const VIDEO_MAX = 100 * 1024 * 1024  // 100 MB — compressor brings it to ~10 MB
-    if (file.type.startsWith("image/") && file.size > IMAGE_MAX) {
-      setSendError("Images must be under 16 MB. Please choose a smaller file.");
-      return;
+    // Per-type size limits (enforced again on the backend)
+    const IMAGE_LIMIT = 7 * 1024 * 1024   // 7 MB
+    const VIDEO_LIMIT = 30 * 1024 * 1024  // 30 MB
+    const mime = file.type || ''
+    if (mime.startsWith('image/') && file.size > IMAGE_LIMIT) {
+      setSendError('Images must be 7 MB or smaller.')
+      return
     }
-    if (file.type.startsWith("video/") && file.size > VIDEO_MAX) {
-      setSendError("Videos must be under 100 MB. Please choose a shorter or smaller video.");
-      return;
+    if (mime.startsWith('video/') && file.size > VIDEO_LIMIT) {
+      setSendError('Videos must be 30 MB or smaller.')
+      return
     }
 
     setUploadingFile(true);
