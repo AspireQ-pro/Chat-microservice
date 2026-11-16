@@ -296,8 +296,10 @@ async function recalcRoomPreview(roomId) {
   let preview = "";
   let lastMessageAt = null;
   if (lastMsg) {
-    if (lastMsg.messageType === "image") preview = "ðŸ“· Photo";
-    else if (lastMsg.messageType === "file") preview = "ðŸ“Ž File";
+    if (lastMsg.messageType === "image") preview = "📷 Photo";
+    else if (lastMsg.messageType === "audio") preview = "🎵 Audio";
+    else if (lastMsg.messageType === "video") preview = "🎬 Video";
+    else if (lastMsg.messageType === "file") preview = "📎 File";
     else preview = (decryptContent(lastMsg.content) || "").slice(0, 100);
     lastMessageAt = lastMsg.createdAt;
   }
