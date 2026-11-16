@@ -13,10 +13,16 @@ module.exports = function createMediaUploadService({
   sendError,
 }) {
   const { API_BASE, BACKEND_URL, CHAT_JWT_SECRET } = config;
-  const MAX_SIZE       = 100 * 1024 * 1024; // hard ceiling kept for non-chat uploads (avatars etc.)
-  const IMAGE_MAX_SIZE =  16 * 1024 * 1024; //  16 MB — images  (WhatsApp: 16 MB)
-  const VIDEO_MAX_SIZE = 100 * 1024 * 1024; // 100 MB — videos  (compressor → ~10 MB)
-  const OTHER_MAX_SIZE = 100 * 1024 * 1024; // 100 MB — documents, audio, archives (WhatsApp: 100 MB)
+  // Per-type upload size limits
+  const MAX_SIZE_IMAGE = 7  * 1024 * 1024  // 7 MB
+  const MAX_SIZE_VIDEO = 30 * 1024 * 1024  // 30 MB
+  const MAX_SIZE_OTHER = 100 * 1024 * 1024 // 100 MB for audio, documents, archives
+
+  function maxSizeForType(fileType) {
+    if (fileType === 'image') return MAX_SIZE_IMAGE
+    if (fileType === 'video') return MAX_SIZE_VIDEO
+    return MAX_SIZE_OTHER
+  }
 
   // ── Serve a stored file back to the client ──────────────────────────────────
   async function sendStoredMedia(req, res, key) {
@@ -47,17 +53,9 @@ module.exports = function createMediaUploadService({
     const type = getUploadType(contentType, originalName);
     const size = Number(req.body?.size);
     if (imagesOnly && type.fileType !== "image") return null;
-    if (!Number.isInteger(size) || size < 1) return null;
-
-    // ── Per-type size limits ─────────────────────────────────────────────────
-    const mime = contentType.toLowerCase();
-    let sizeLimit = OTHER_MAX_SIZE;
-    let sizeLabel = "Files must be under 100 MB";
-    if (mime.startsWith("image/")) { sizeLimit = IMAGE_MAX_SIZE; sizeLabel = "Images must be under 16 MB"; }
-    else if (mime.startsWith("video/")) { sizeLimit = VIDEO_MAX_SIZE; sizeLabel = "Videos must be under 100 MB"; }
-
-    if (size > sizeLimit) return { error: sizeLabel };
-    return { contentType, type, size, sizeLimit };
+    const maxSize = maxSizeForType(type.fileType);
+    if (!Number.isInteger(size) || size < 1 || size > maxSize) return null;
+    return { contentType, type, size };
   }
 
   // ── Start a presigned S3 upload ──────────────────────────────────────────────
@@ -74,7 +72,7 @@ module.exports = function createMediaUploadService({
     const form = await mediaStorage.createUploadForm({
       key: stagingKey,
       contentType: input.contentType,
-      maxSize: input.sizeLimit, // use the per-type limit, not the global cap
+      maxSize: maxSizeForType(input.type.fileType),
     });
 
     const originalName = String(req.body?.fileName || "").slice(0, 255) || filename;
@@ -126,10 +124,8 @@ module.exports = function createMediaUploadService({
       stagingKey: payload.stagingKey,
       finalKey: payload.finalKey,
       contentType: payload.contentType,
-      // Use the per-type limit stored in the token; fall back to 20 MB for
-      // tokens issued before this field existed.
-      maxSize: payload.sizeLimit || OTHER_MAX_SIZE,
-      verifySignature: () => true,
+      maxSize: maxSizeForType(payload.fileType),
+      verifySignature: () => true, // accept any file content
     });
     return {
       ...saved,

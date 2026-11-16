@@ -10,7 +10,7 @@ import {
   Download, InsertDriveFile, PictureAsPdf, TableChart, Slideshow,
   Description, AudioFile, VideoFile, Archive, TextSnippet,
 } from '@mui/icons-material'
-import { openFile, triggerDownload, resolveMime } from '../utils/fileOpener'
+import { openFile, downloadFile, resolveMime } from '../utils/fileOpener'
 
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
 function Ticks({ status }) {
@@ -60,7 +60,7 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-/* ─── Auth fetch helper ───────────────────────────────────────────────────── */
+/* ─── Auth fetch helper (used only for the media blob load) ──────────────── */
 function authFetch(url, token) {
   let headers = {}
   try {
@@ -211,24 +211,17 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     }
   }, [mediaBlobUrl, handleOpenFile])
 
-  /* ── Explicit download: fetch blob with auth → <a download> ──────────────
-     Always uses the original fileName so the saved file has the right name
-     and extension. Reuses the already-loaded blob for media types. ── */
+  /* ── Explicit download — uses downloadFile() from fileOpener ── */
   const [downloading, setDownloading] = useState(false)
   const handleDownload = useCallback(async (e) => {
     e?.stopPropagation()
     if (downloading) return
     const url = proxyUrl()
     if (!url) return
+    const fileName = message.fileName || url.split('/').pop().split('?')[0] || 'download'
     setDownloading(true)
     try {
-      const res = await authFetch(url, token)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const blob = await res.blob()
-      const blobUrl = URL.createObjectURL(blob)
-      const fileName = message.fileName || url.split('/').pop().split('?')[0] || 'download'
-      triggerDownload(blobUrl, fileName)
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
+      await downloadFile(url, fileName, token)
     } catch (err) {
       console.error('[MessageBubble] download error', err)
     } finally {
