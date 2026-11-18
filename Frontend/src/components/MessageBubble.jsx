@@ -385,8 +385,8 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
 
             {/* ── Image ──────────────────────────────────────────────────────
                 Blob is loaded with auth and rendered inline as a thumbnail.
-                Clicking opens the image in a new browser tab (native viewer).
-                No dialog, no modal — the browser handles it. ── */}
+                Clicking the image opens it in a new browser tab (native viewer).
+                A download button is overlaid in the bottom-right corner. ── */}
             {message.fileUrl && isImage && (
               mediaLoading ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
@@ -403,16 +403,47 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                 </Box>
               ) : mediaBlobUrl ? (
                 <Box
-                  component="img" src={mediaBlobUrl}
-                  alt={displayName || 'Chat attachment'}
-                  loading="lazy"
-                  onClick={handleOpenImage}
                   sx={{
-                    display: 'block', width: '100%', maxWidth: 260,
-                    height: 'auto', maxHeight: 260, objectFit: 'cover',
-                    borderRadius: 1, mt: message.text ? 1 : 0.25, cursor: 'pointer',
+                    position: 'relative', display: 'inline-block',
+                    mt: message.text ? 1 : 0.25,
+                    '&:hover .img-download-btn': { opacity: 1 },
                   }}
-                />
+                >
+                  <Box
+                    component="img" src={mediaBlobUrl}
+                    alt={displayName || 'Chat attachment'}
+                    loading="lazy"
+                    onClick={handleOpenImage}
+                    sx={{
+                      display: 'block', width: '100%', maxWidth: 260,
+                      height: 'auto', maxHeight: 260, objectFit: 'cover',
+                      borderRadius: 1, cursor: 'pointer',
+                    }}
+                  />
+                  {/* Download button — overlaid on hover (or always visible on touch) */}
+                  <Tooltip title="Download image">
+                    <IconButton
+                      className="img-download-btn"
+                      size="small"
+                      onClick={handleDownload}
+                      disabled={downloading}
+                      sx={{
+                        position: 'absolute', bottom: 6, right: 6,
+                        bgcolor: 'rgba(0,0,0,0.45)', color: '#fff',
+                        p: 0.5, opacity: 0,
+                        transition: 'opacity 0.15s',
+                        '&:hover': { bgcolor: 'rgba(0,0,0,0.65)' },
+                        // Always show on touch devices
+                        '@media (hover: none)': { opacity: 1 },
+                      }}
+                    >
+                      {downloading
+                        ? <CircularProgress size={14} sx={{ color: '#fff' }} />
+                        : <Download sx={{ fontSize: 16 }} />
+                      }
+                    </IconButton>
+                  </Tooltip>
+                </Box>
               ) : (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
                   <CircularProgress size={16} sx={{ color: mutedColor }} />
@@ -493,7 +524,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                   px: 1, py: 0.75,
                   bgcolor: message.mine ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)',
                   borderRadius: 2,
-                  minWidth: 180, maxWidth: 260,
+                  minWidth: 0, maxWidth: 260,
                 }}
               >
                 {/* Click icon or filename → openFile() waterfall (no dialog) */}
@@ -583,6 +614,18 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
           >
             <ListItemIcon sx={{ minWidth: 'auto' }}><Edit sx={{ fontSize: 17, color: '#3C4F4A' }} /></ListItemIcon>
             <ListItemText primary="Edit" primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500 }} />
+          </MenuItem>
+        )}
+        {(isImage || isFile) && message.fileUrl && (
+          <MenuItem
+            onClick={(e) => { closeMenu(); handleDownload(e) }}
+            sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#f0f5f4' } }}
+          >
+            <ListItemIcon sx={{ minWidth: 'auto' }}><Download sx={{ fontSize: 17, color: '#3C4F4A' }} /></ListItemIcon>
+            <ListItemText
+              primary={isImage ? 'Save image' : 'Download'}
+              primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500 }}
+            />
           </MenuItem>
         )}
         <MenuItem onClick={handleDeleteForMe}
