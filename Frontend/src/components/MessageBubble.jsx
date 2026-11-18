@@ -324,8 +324,8 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
           userSelect: 'none',
         }}
       >
-        {/* Sender name in group chats */}
-        {!message.mine && message.senderName && !message.isDeleted && (
+        {/* Sender name in group chats — shown on both normal and deleted messages */}
+        {!message.mine && message.senderName && (
           <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, color: '#7e57c2', mb: 0.25 }}>
             {message.senderName}
           </Typography>
