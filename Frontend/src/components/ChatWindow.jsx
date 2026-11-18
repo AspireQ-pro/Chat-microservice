@@ -12,6 +12,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Chip,
   IconButton,
   LinearProgress,
   ListItemIcon,
@@ -31,6 +32,31 @@ import {
 } from "@mui/icons-material";
 import MessageBubble from "./MessageBubble";
 import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
+
+/* ── Date separator label ───────────────────────────────────────────────── */
+function dateSeparatorLabel(dateStr) {
+  // dateStr is a YYYY-MM-DD string in local time
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+
+  if (dateStr === todayStr) return "Today";
+  if (dateStr === yesterdayStr) return "Yesterday";
+
+  // e.g. "Monday, 12 November 2026"
+  const [y, mo, d] = dateStr.split("-").map(Number);
+  return new Date(y, mo - 1, d).toLocaleDateString(undefined, {
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
+  });
+}
+
+function localDateKey(isoString) {
+  if (!isoString) return null;
+  const d = new Date(isoString);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 function ChatWindow({
   isMobile,
@@ -462,16 +488,49 @@ function ChatWindow({
             </Typography>
           </Box>
         ) : (
-          messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              onRetry={onRetryMessage}
-              onEdit={onEditMessage}
-              onDelete={onDeleteMessage}
-              isAdmin={isAdmin}
-            />
-          ))
+          (() => {
+            const items = [];
+            let lastDateKey = null;
+            messages.forEach((message) => {
+              const dateKey = localDateKey(message.createdAt);
+              if (dateKey && dateKey !== lastDateKey) {
+                lastDateKey = dateKey;
+                items.push(
+                  <Box
+                    key={`sep-${dateKey}`}
+                    sx={{ display: "flex", alignItems: "center", justifyContent: "center", my: 1.5, px: 2 }}
+                  >
+                    <Chip
+                      label={dateSeparatorLabel(dateKey)}
+                      size="small"
+                      sx={{
+                        bgcolor: "rgba(0,0,0,0.08)",
+                        color: "text.secondary",
+                        fontSize: "0.7rem",
+                        fontWeight: 600,
+                        height: 22,
+                        px: 0.5,
+                        borderRadius: "11px",
+                        userSelect: "none",
+                        "& .MuiChip-label": { px: 1.25 },
+                      }}
+                    />
+                  </Box>
+                );
+              }
+              items.push(
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  onRetry={onRetryMessage}
+                  onEdit={onEditMessage}
+                  onDelete={onDeleteMessage}
+                  isAdmin={isAdmin}
+                />
+              );
+            });
+            return items;
+          })()
         )}
         <div ref={messagesEndRef} />
       </Box>
