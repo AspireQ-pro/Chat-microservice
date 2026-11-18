@@ -15,22 +15,22 @@ import { openFile, downloadFile, resolveMime } from '../utils/fileOpener'
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
 function Ticks({ status }) {
   if (!status) return null
-  if (status === 'sending') return <AccessTime sx={{ fontSize: 13, ml: 0.5, color: 'rgba(255,255,255,0.6)' }} />
+  if (status === 'sending') return <AccessTime sx={{ fontSize: 12, ml: 0.5, color: 'rgba(255,255,255,0.55)', verticalAlign: 'middle' }} />
   if (status === 'sent') return (
-    <Box sx={{ display: 'inline-flex', ml: 0.5 }}>
-      <Check sx={{ fontSize: 14, color: 'rgba(255,255,255,0.7)' }} />
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5, verticalAlign: 'middle' }}>
+      <Check sx={{ fontSize: 15, color: 'rgba(255,255,255,0.7)' }} />
     </Box>
   )
   if (status === 'delivered') return (
-    <Box sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5, position: 'relative', width: 18, height: 14 }}>
-      <Check sx={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', position: 'absolute', left: 0 }} />
-      <Check sx={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', position: 'absolute', left: 4 }} />
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5, verticalAlign: 'middle', position: 'relative', width: 20, height: 15 }}>
+      <Check sx={{ fontSize: 15, color: 'rgba(255,255,255,0.7)', position: 'absolute', left: 0 }} />
+      <Check sx={{ fontSize: 15, color: 'rgba(255,255,255,0.7)', position: 'absolute', left: 6 }} />
     </Box>
   )
   if (status === 'read') return (
-    <Box sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5, position: 'relative', width: 18, height: 14 }}>
-      <Check sx={{ fontSize: 14, color: '#4fc3f7', position: 'absolute', left: 0 }} />
-      <Check sx={{ fontSize: 14, color: '#4fc3f7', position: 'absolute', left: 4 }} />
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', ml: 0.5, verticalAlign: 'middle', position: 'relative', width: 20, height: 15 }}>
+      <Check sx={{ fontSize: 15, color: '#53bdeb', position: 'absolute', left: 0 }} />
+      <Check sx={{ fontSize: 15, color: '#53bdeb', position: 'absolute', left: 6 }} />
     </Box>
   )
   return null

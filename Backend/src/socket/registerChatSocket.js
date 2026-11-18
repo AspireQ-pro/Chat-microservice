@@ -144,10 +144,18 @@ io.on("connection", (socket) => {
           }
           const senders = [...new Set(undelivered.map((m) => m.senderId))];
           for (const sId of senders) {
-            io.to(`user:${sId}`).emit("messages_delivered", {
-              recipientId: socket.userId,
-              deliveredAt: now,
-            });
+            // Collect the rooms this sender has affected so the client can
+            // update the correct room's messages (not every room).
+            const senderRooms = [...new Set(
+              undelivered.filter((m) => m.senderId === sId).map((m) => m.roomId)
+            )];
+            for (const rid of senderRooms) {
+              io.to(`user:${sId}`).emit("messages_delivered", {
+                roomId: rid,
+                recipientId: socket.userId,
+                deliveredAt: now,
+              });
+            }
           }
         }
       }
