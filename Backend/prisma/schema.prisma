@@ -87,6 +87,7 @@ model Message {
   fileName    String?
   fileSize    Int?
   mimeType    String?
+  groupId     String?
   isRead      Boolean  @default(false)
   readAt      DateTime?
   deliveredAt DateTime?
@@ -99,6 +100,7 @@ model Message {
   deletions  MessageDeletion[]
 
   @@index([roomId, createdAt])
+  @@index([groupId])
 }
 
 model MessageDeletion {
