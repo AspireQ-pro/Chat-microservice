@@ -133,12 +133,19 @@ app.delete(`${API_BASE}/rooms/:roomId/members/me`, authenticateChatJWT, async (r
   try {
     const room = await prisma.chatRoom.findFirst({
       where: { id: roomId, projectId: req.projectId, isGroup: true },
-      include: { members: { select: { userId: true } } },
+      include: { members: { select: { userId: true, role: true } } },
     });
     if (!room) return res.status(404).json({ error: "Room not found" });
 
     const isMember = room.members.some((m) => m.userId === req.userId);
     if (!isMember) return res.status(403).json({ error: "Not a member of this room" });
+
+    // Prevent the last admin from leaving — the group would become unmanageable.
+    const admins = room.members.filter((m) => m.role === "admin");
+    const isLastAdmin = admins.length === 1 && admins[0].userId === req.userId;
+    if (isLastAdmin) {
+      return res.status(400).json({ error: "You are the only admin. Promote another member before leaving." });
+    }
 
     await prisma.chatRoomMember.delete({
       where: { roomId_userId: { roomId, userId: req.userId } },
