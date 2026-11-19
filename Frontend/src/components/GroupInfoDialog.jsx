@@ -483,7 +483,8 @@ function GroupInfoDialog({
                         gap: 1.5,
                       }}
                     >
-                      <Avatar
+                      <AuthenticatedAvatar
+                        src={user.avatarUrl || undefined}
                         sx={{
                           width: 40,
                           height: 40,
@@ -495,7 +496,7 @@ function GroupInfoDialog({
                         }}
                       >
                         {initials(user.name || '?')}
-                      </Avatar>
+                      </AuthenticatedAvatar>
 
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
