@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useCallback, useEffect } from "react";
 import { useSelector } from "react-redux";
 import {
   Alert,
@@ -27,10 +27,13 @@ import {
   AttachFile,
   Block,
   Circle,
+  Close,
+  InsertDriveFile,
   MoreVert,
   Send,
 } from "@mui/icons-material";
 import MessageBubble from "./MessageBubble";
+import MediaAlbumBubble from "./MediaAlbumBubble";
 import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
 
 /* ── Date separator label ───────────────────────────────────────────────── */
@@ -56,6 +59,24 @@ function localDateKey(isoString) {
   if (!isoString) return null;
   const d = new Date(isoString);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/* ── Thumbnail for image files queued for upload ───────────────────────── */
+function QueuedImageThumb({ file }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setSrc(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  if (!src) return <InsertDriveFile sx={{ fontSize: 20, color: "#5c7a74", flexShrink: 0 }} />;
+  return (
+    <Box
+      component="img"
+      src={src}
+      sx={{ width: 28, height: 28, objectFit: "cover", borderRadius: "4px", flexShrink: 0 }}
+    />
+  );
 }
 
 function ChatWindow({
@@ -94,6 +115,26 @@ function ChatWindow({
   const allowGroupChat = Boolean(user?.allowGroupChat);
   const allowDirectChat = Boolean(user?.allowDirectChat);
   const isAdmin = Boolean(user?.role) && user.role.toLowerCase().includes("admin");
+
+  // ── File queue tray ──
+  // Files are staged here; the user can keep adding more before sending.
+  const [queuedFiles, setQueuedFiles] = useState([]);
+  const addToQueue = useCallback((fileList) => {
+    const incoming = Array.from(fileList);
+    setQueuedFiles((prev) => {
+      // Avoid exact duplicates (same name + size) already in the queue
+      const existing = new Set(prev.map((f) => `${f.name}:${f.size}`));
+      const fresh = incoming.filter((f) => !existing.has(`${f.name}:${f.size}`));
+      return [...prev, ...fresh];
+    });
+  }, []);
+  const removeFromQueue = useCallback((idx) => {
+    setQueuedFiles((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+  const clearQueue = useCallback(() => setQueuedFiles([]), []);
+
+  // Reset queue whenever the active room changes
+  useEffect(() => { setQueuedFiles([]); }, [activeRoom?.id]);
 
   // ── Three-dot menu ──
   const [menuAnchor, setMenuAnchor] = useState(null);
@@ -168,7 +209,6 @@ function ChatWindow({
   const attachDisabled =
     !activeRoom?.id ||
     uploadingFile ||
-    sendingFirstMessage ||
     adminOnlyBlocked ||
     isBlocked ||
     chatFeatureDisabled ||
@@ -181,7 +221,8 @@ function ChatWindow({
     isBlocked ||
     chatFeatureDisabled;
 
-  const sendDisabled = !input.trim() || inputDisabled;
+  const sendDisabled = (!input.trim() && queuedFiles.length === 0) || inputDisabled;
+  const sendQueueDisabled = uploadingFile || queuedFiles.length === 0 || adminOnlyBlocked || isBlocked || chatFeatureDisabled || socketConnected === false;
 
   // Drag-and-drop handlers
   const handleDragOver = useCallback((e) => {
@@ -203,8 +244,8 @@ function ChatWindow({
     setIsDragOver(false);
     if (attachDisabled) return;
     const files = e.dataTransfer.files;
-    if (files?.length) onUploadFile?.(files);
-  }, [attachDisabled, onUploadFile]);
+    if (files?.length) addToQueue(files);
+  }, [attachDisabled, addToQueue]);
 
   // ── Empty state ──
   if (!activeContact) {
@@ -518,16 +559,48 @@ function ChatWindow({
                   </Box>
                 );
               }
-              items.push(
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  onRetry={onRetryMessage}
-                  onEdit={onEditMessage}
-                  onDelete={onDeleteMessage}
-                  isAdmin={isAdmin}
-                />
-              );
+              // Group messages that share a groupId into a single media album bubble.
+              if (message.groupId) {
+                const prevItem = items[items.length - 1];
+                if (
+                  prevItem &&
+                  prevItem.type === MediaAlbumBubble &&
+                  prevItem.props.groupId === message.groupId
+                ) {
+                  items[items.length - 1] = (
+                    <MediaAlbumBubble
+                      key={message.groupId}
+                      groupId={message.groupId}
+                      messages={[...prevItem.props.messages, message]}
+                      onRetry={onRetryMessage}
+                      onDelete={onDeleteMessage}
+                      isAdmin={isAdmin}
+                    />
+                  );
+                } else {
+                  items.push(
+                    <MediaAlbumBubble
+                      key={message.groupId}
+                      groupId={message.groupId}
+                      messages={[message]}
+                      onRetry={onRetryMessage}
+                      onDelete={onDeleteMessage}
+                      isAdmin={isAdmin}
+                    />
+                  );
+                }
+              } else {
+                items.push(
+                  <MessageBubble
+                    key={message.id}
+                    message={message}
+                    onRetry={onRetryMessage}
+                    onEdit={onEditMessage}
+                    onDelete={onDeleteMessage}
+                    isAdmin={isAdmin}
+                  />
+                );
+              }
             });
             return items;
           })()
@@ -665,6 +738,79 @@ function ChatWindow({
               {sendError}
             </Alert>
           )}
+
+          {/* ── File queue tray ── */}
+          {queuedFiles.length > 0 && (
+            <Box
+              sx={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 0.75,
+                mb: 1,
+                p: 1,
+                bgcolor: "#f1f5f4",
+                borderRadius: "10px",
+                border: "1px solid #dde8e5",
+              }}
+            >
+              {queuedFiles.map((file, idx) => {
+                const isImage = file.type.startsWith("image/");
+                return (
+                  <Box
+                    key={idx}
+                    sx={{
+                      position: "relative",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.5,
+                      px: 1,
+                      py: 0.5,
+                      bgcolor: "#fff",
+                      border: "1px solid #c8d8d4",
+                      borderRadius: "8px",
+                      maxWidth: 180,
+                    }}
+                  >
+                    {isImage ? (
+                      <QueuedImageThumb file={file} />
+                    ) : (
+                      <InsertDriveFile sx={{ fontSize: 20, color: "#5c7a74", flexShrink: 0 }} />
+                    )}
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        maxWidth: 100,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontSize: "0.7rem",
+                        color: "text.secondary",
+                      }}
+                    >
+                      {file.name}
+                    </Typography>
+                    <IconButton
+                      size="small"
+                      onClick={() => removeFromQueue(idx)}
+                      sx={{ p: 0.25, ml: 0.25, color: "#9e9e9e", "&:hover": { color: "#c62828" } }}
+                    >
+                      <Close sx={{ fontSize: 14 }} />
+                    </IconButton>
+                  </Box>
+                );
+              })}
+              <Tooltip title="Clear all">
+                <IconButton
+                  size="small"
+                  onClick={clearQueue}
+                  sx={{ ml: "auto", p: 0.5, color: "#9e9e9e", "&:hover": { color: "#c62828" } }}
+                >
+                  <Close sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
+
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <input
               ref={fileInputRef}
@@ -673,7 +819,7 @@ function ChatWindow({
               hidden
               onChange={(event) => {
                 const files = event.target.files;
-                if (files?.length) onUploadFile?.(files);
+                if (files?.length) addToQueue(files);
                 event.target.value = "";
               }}
             />
@@ -681,7 +827,7 @@ function ChatWindow({
               title={
                 socketConnected === false
                   ? "Reconnecting… wait to send files"
-                  : "Attach file"
+                  : "Attach file (pick multiple to queue)"
               }
               placement="top"
             >
@@ -710,18 +856,35 @@ function ChatWindow({
               maxRows={3}
               size="small"
               placeholder={
-                canSendFirstRequest
+                queuedFiles.length > 0
+                  ? `${queuedFiles.length} file${queuedFiles.length > 1 ? "s" : ""} queued — press Send or add more`
+                  : canSendFirstRequest
                   ? `Write a message request to ${activeContact.name}...`
                   : `Message ${activeContact.name}...`
               }
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              onKeyDown={handleKeyDown}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && queuedFiles.length > 0 && !input.trim()) {
+                  e.preventDefault();
+                  onUploadFile?.(queuedFiles);
+                  clearQueue();
+                  return;
+                }
+                handleKeyDown(e);
+              }}
               disabled={inputDisabled}
               sx={{ "& .MuiOutlinedInput-root": { borderRadius: "12px", bgcolor: "#f8fafc" } }}
             />
             <IconButton
-              onClick={handleSend}
+              onClick={() => {
+                if (queuedFiles.length > 0) {
+                  onUploadFile?.(queuedFiles);
+                  clearQueue();
+                } else {
+                  handleSend();
+                }
+              }}
               disabled={sendDisabled}
               sx={{
                 bgcolor: !sendDisabled ? "#3C4F4A" : "#e0e0e0",

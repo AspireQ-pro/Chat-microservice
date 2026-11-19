@@ -678,6 +678,10 @@ export function useChatHandler() {
     setSendError("");
     setUploadingFile(true);
 
+    // For multi-file batches, all messages share one groupId so the UI can
+    // render them as a single media album bubble.
+    const batchGroupId = fileArray.length > 1 ? `grp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` : null;
+
     // Upload files one after another so the socket isn't flooded
     for (const file of fileArray) {
       setUploadProgress(0);
@@ -706,6 +710,7 @@ export function useChatHandler() {
               fileName: uploaded.fileName || file.name || null,
               fileSize: uploaded.fileSize || file.size || null,
               mimeType,
+              groupId: batchGroupId,
               messageType: uploaded.fileType === "image" ? "image" : uploaded.fileType === "audio" ? "audio" : uploaded.fileType === "video" ? "video" : "file",
               time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
               createdAt: new Date().toISOString(),
@@ -721,6 +726,7 @@ export function useChatHandler() {
           fileName: uploaded.fileName || file.name || null,
           fileSize: uploaded.fileSize || file.size || null,
           mimeType,
+          groupId: batchGroupId,
           clientId,
         });
       } catch (err) {

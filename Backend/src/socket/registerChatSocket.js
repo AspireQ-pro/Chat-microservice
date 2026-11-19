@@ -226,7 +226,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "send_message",
-    async ({ roomId, content, fileUrl, fileType, fileName, fileSize, mimeType, clientId }) => {
+    async ({ roomId, content, fileUrl, fileType, fileName, fileSize, mimeType, groupId, clientId }) => {
       // The sender is always the authenticated JWT user (never client-supplied).
       const senderId = socket.userId;
       if (!roomId || (!content && !fileUrl)) {
@@ -427,6 +427,7 @@ io.on("connection", (socket) => {
             // Sanitise to max 255 chars. Null for text messages and for
             // legacy messages upgraded without this field.
             mimeType: fileUrl ? (String(mimeType || "").slice(0, 255) || null) : null,
+            groupId: groupId ? String(groupId).slice(0, 36) : null,
             messageType,
             deliveredAt: someRecipientOnline ? new Date() : null,
           },

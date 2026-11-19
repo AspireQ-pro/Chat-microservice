@@ -76,6 +76,7 @@ function normalizeMessage(m, currentUserId) {
     fileSize: m.fileSize || null,
     // Phase 4: preserve mimeType from server; null for legacy messages (backward compat).
     mimeType: m.mimeType || null,
+    groupId: m.groupId || null,
     messageType: m.messageType || "text",
     time: new Date(m.createdAt || Date.now()).toLocaleTimeString([], {
       hour: "2-digit",
