@@ -580,13 +580,21 @@ function GroupInfoDialog({
         {(() => {
           const adminCount = members.filter((m) => m.role === 'admin').length
           const isLastAdmin = isAdmin && adminCount <= 1
+          // A group must keep at least 3 members — leaving from exactly 3 would drop it to 2.
+          const tooFewAfterLeave = members.length <= 3
+          const leaveBlocked = isLastAdmin || tooFewAfterLeave
+          const leaveTooltip = isLastAdmin
+            ? 'Promote another member to admin before leaving'
+            : tooFewAfterLeave
+            ? 'A group must have at least 3 members. Add more members or delete the group.'
+            : ''
           return (
             <Box sx={{ px: 2.5, pt: 1.5, pb: 3 }}>
               <Tooltip
-                title={isLastAdmin ? 'Promote another member to admin before leaving' : ''}
-                disableHoverListener={!isLastAdmin}
-                disableFocusListener={!isLastAdmin}
-                disableTouchListener={!isLastAdmin}
+                title={leaveTooltip}
+                disableHoverListener={!leaveBlocked}
+                disableFocusListener={!leaveBlocked}
+                disableTouchListener={!leaveBlocked}
               >
                 <span style={{ display: 'block' }}>
                   <Button
@@ -594,7 +602,7 @@ function GroupInfoDialog({
                     variant="outlined"
                     color="error"
                     startIcon={leaving ? <CircularProgress size={16} color="inherit" /> : <ExitToApp />}
-                    disabled={leaving || isLastAdmin}
+                    disabled={leaving || leaveBlocked}
                     onClick={handleLeave}
                     sx={{
                       borderRadius: '12px',
@@ -614,6 +622,11 @@ function GroupInfoDialog({
               {isLastAdmin && (
                 <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'text.secondary', textAlign: 'center' }}>
                   You're the only admin. Promote someone before leaving.
+                </Typography>
+              )}
+              {!isLastAdmin && tooFewAfterLeave && (
+                <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'text.secondary', textAlign: 'center' }}>
+                  A group must have at least 3 members. Add more members or delete the group.
                 </Typography>
               )}
             </Box>

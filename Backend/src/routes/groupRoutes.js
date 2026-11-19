@@ -147,6 +147,14 @@ app.delete(`${API_BASE}/rooms/:roomId/members/me`, authenticateChatJWT, async (r
       return res.status(400).json({ error: "You are the only admin. Promote another member before leaving." });
     }
 
+    // A group must have at least 3 members. Leaving from a 3-member group would
+    // drop it to 2, which violates the minimum size rule.
+    if (room.members.length <= 3) {
+      return res.status(400).json({
+        error: "A group must have at least 3 members. Add more members or delete the group instead.",
+      });
+    }
+
     await prisma.chatRoomMember.delete({
       where: { roomId_userId: { roomId, userId: req.userId } },
     });
