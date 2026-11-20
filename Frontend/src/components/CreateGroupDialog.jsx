@@ -2,12 +2,12 @@ import React, { useState, useMemo, useRef } from 'react'
 import {
   Box, Typography, Avatar, TextField, Button,
   CircularProgress, Alert, Dialog, Slide,
-  IconButton, InputAdornment, Chip,
-  Snackbar, Switch, FormControlLabel,
+  IconButton, InputAdornment,
+  Snackbar, Switch, FormControlLabel, Checkbox,
 } from '@mui/material'
 import {
   ArrowBackIos, Close, Search, Check,
-  CameraAlt, Edit,
+  CameraAlt, Edit, CheckBox, CheckBoxOutlineBlank, IndeterminateCheckBox,
 } from '@mui/icons-material'
 import { useTheme, useMediaQuery } from '@mui/material'
 import { useDispatch } from 'react-redux'
@@ -170,63 +170,82 @@ function CreateGroupDialog({
         />
       </Box>
 
-      {/* Selected chips */}
+      {/* Selected count badge */}
       {selectedContacts.length > 0 && (
-        <Box sx={{ px: 2, pb: 1 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75 }}>
-            <Typography variant="caption" fontWeight={600} color="text.secondary">
+        <Box sx={{ px: 2, pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 0.75,
+              bgcolor: '#2D4A44',
+              color: '#fff',
+              borderRadius: '20px',
+              px: 1.5,
+              py: 0.4,
+            }}
+          >
+            <Check sx={{ fontSize: 13 }} />
+            <Typography variant="caption" fontWeight={600} sx={{ color: '#fff', lineHeight: 1 }}>
               {selectedContacts.length} selected
             </Typography>
-            <Typography
-              variant="caption"
-              color="#3C4F4A"
-              fontWeight={600}
-              sx={{ cursor: 'pointer', textDecoration: 'underline' }}
-              onClick={() => selectedContacts.forEach((c) => toggleGroupMember(c.id))}
-            >
-              Clear all
-            </Typography>
           </Box>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-            {selectedContacts.map((c) => (
-              <Chip
-                key={c.id}
-                size="small"
-                avatar={
-                  <Avatar sx={{ bgcolor: avatarColor(c.name), fontSize: '0.6rem', width: 22, height: 22 }}>
-                    {initials(c.name)}
-                  </Avatar>
-                }
-                label={c.name?.split(' ')[0] || c.name}
-                onDelete={() => toggleGroupMember(c.id)}
-                deleteIcon={<Close sx={{ fontSize: '14px !important' }} />}
-                sx={{
-                  bgcolor: '#EEF2F1',
-                  border: '1px solid #D5DCD9',
-                  borderRadius: '20px',
-                  fontSize: '0.78rem',
-                  height: 28,
-                  '& .MuiChip-deleteIcon': { color: '#3C4F4A' },
-                }}
-              />
-            ))}
-          </Box>
+          <Typography
+            variant="caption"
+            color="#3C4F4A"
+            fontWeight={600}
+            sx={{ cursor: 'pointer', textDecoration: 'underline' }}
+            onClick={() => selectedContacts.forEach((c) => toggleGroupMember(c.id))}
+          >
+            Clear all
+          </Typography>
         </Box>
       )}
 
       {/* Contact list */}
       <Box sx={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        {/* Section label */}
-        {filtered.length > 0 && (
-          <Box sx={{ px: 2, py: 0.75, display: 'flex', justifyContent: 'space-between' }}>
-            <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              Contacts
-            </Typography>
-            <Typography variant="caption" color="text.disabled">
-              {filtered.length} contact{filtered.length !== 1 ? 's' : ''}
-            </Typography>
-          </Box>
-        )}
+        {/* Section label + Select all checkbox */}
+        {filtered.length > 0 && (() => {
+          const allSelected = filtered.every((c) => groupMemberIds.includes(c.id))
+          const someSelected = filtered.some((c) => groupMemberIds.includes(c.id))
+          return (
+            <Box
+              sx={{
+                px: 2, py: 0.5,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                borderBottom: '1px solid #F0F0F0',
+              }}
+            >
+              <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Contacts · {filtered.length}
+              </Typography>
+              <Box
+                sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => {
+                  if (allSelected) {
+                    filtered.forEach((c) => { if (groupMemberIds.includes(c.id)) toggleGroupMember(c.id) })
+                  } else {
+                    filtered.forEach((c) => { if (!groupMemberIds.includes(c.id)) toggleGroupMember(c.id) })
+                  }
+                }}
+              >
+                <Checkbox
+                  size="small"
+                  checked={allSelected}
+                  indeterminate={!allSelected && someSelected}
+                  disableRipple
+                  icon={<CheckBoxOutlineBlank sx={{ fontSize: 18, color: '#B0BDB9' }} />}
+                  checkedIcon={<CheckBox sx={{ fontSize: 18, color: '#2D4A44' }} />}
+                  indeterminateIcon={<IndeterminateCheckBox sx={{ fontSize: 18, color: '#2D4A44' }} />}
+                  sx={{ p: 0 }}
+                />
+                <Typography variant="caption" fontWeight={600} sx={{ color: '#3C4F4A' }}>
+                  {allSelected ? 'Deselect all' : 'Select all'}
+                </Typography>
+              </Box>
+            </Box>
+          )
+        })()}
 
         {filtered.length === 0 ? (
           <Box sx={{ px: 2, py: 4, textAlign: 'center' }}>
