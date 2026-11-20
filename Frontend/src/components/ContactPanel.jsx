@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Box,
   Typography,
@@ -15,9 +15,7 @@ import {
 } from "@mui/icons-material";
 import ContactItem from "./ContactItem";
 import GroupItem from "./GroupItem";
-import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
-import { useSelector, useDispatch } from "react-redux";
-import { fetchSelfProfile } from "@/provider/chatSlice";
+import { useSelector } from "react-redux";
 
 function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, handleSelectRoom, onGroupInfoClick }) {
   return (
@@ -106,24 +104,12 @@ function ContactPanel({
   setShowPanel,
   onGroupInfoClick,
 }) {
-  const dispatch = useDispatch();
   const user = useSelector((s) => s.auth.user);
-  const myAvatarUrl = useSelector((s) => s.auth.myAvatarUrl);
   const allowGroupChat = Boolean(user?.allowGroupChat);
   const allowDirectChat = Boolean(user?.allowDirectChat);
   const showTabs = allowGroupChat && allowDirectChat;
 
   const [activeTab, setActiveTab] = useState(0); // 0 = Direct Chats, 1 = Groups
-
-
-
-  // Fetch own profile (including avatarUrl synced from Society Management) on
-  // mount so the avatar circle is always populated.
-  useEffect(() => {
-    dispatch(fetchSelfProfile());
-  }, [dispatch]);
-
-
 
   const searchLower = (search || "").trim().toLowerCase();
   const groupRooms = rooms
@@ -202,14 +188,6 @@ function ContactPanel({
               ? "Individual Chats"
               : "Chats"}
         </Typography>
-
-        {/* My profile avatar — read-only, managed by Society Management System */}
-        <AuthenticatedAvatar
-          src={myAvatarUrl || undefined}
-          sx={{ width: 36, height: 36, bgcolor: "#3C4F4A", fontSize: "0.8rem", fontWeight: 700, flexShrink: 0 }}
-        >
-          {(user?.name || "?").split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)}
-        </AuthenticatedAvatar>
       </Box>
 
       {/* Toast feedback */}
