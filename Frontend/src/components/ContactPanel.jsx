@@ -326,7 +326,20 @@ function ContactPanel({
       )}
 
       {/* Content */}
-      <Box sx={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+      <Box
+        sx={{
+          flex: 1,
+          overflowY: "auto",
+          minHeight: 0,
+          scrollbarWidth: "thin",
+          "&::-webkit-scrollbar": { width: "6px" },
+          "&::-webkit-scrollbar-track": { background: "transparent" },
+          "&::-webkit-scrollbar-thumb": {
+            backgroundColor: "rgba(0, 0, 0, 0.25)",
+            borderRadius: "6px",
+          },
+        }}
+      >
         {!allowGroupChat && !allowDirectChat ? (
           <Box sx={{ px: 3, py: 6, textAlign: "center" }}>
             <Typography variant="body2" fontWeight={600} color="text.secondary" gutterBottom>
