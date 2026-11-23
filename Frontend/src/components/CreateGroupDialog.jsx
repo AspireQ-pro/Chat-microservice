@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react'
+import React from 'react'
 import {
   Box, Typography, Avatar, TextField, Button,
   CircularProgress, Alert, Dialog, Slide,
@@ -9,29 +9,7 @@ import {
   ArrowBackIos, Close, Search, Check,
   CameraAlt, Edit, CheckBox, CheckBoxOutlineBlank, IndeterminateCheckBox,
 } from '@mui/icons-material'
-import { useTheme, useMediaQuery } from '@mui/material'
-import { useDispatch } from 'react-redux'
-import { uploadGroupAvatar } from '@/provider/chatSlice'
-
-/* ─── helpers ─────────────────────────────────── */
-function initials(name = '') {
-  return name
-    .split(' ')
-    .map((w) => w[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase()
-}
-
-const AVATAR_COLORS = [
-  '#A8C5BD', '#B5C8E2', '#C8B5D4', '#D4C4A8', '#A8D4B5',
-  '#D4A8B5', '#B5D4C8', '#C8D4A8', '#A8B5D4', '#D4B5A8',
-]
-function avatarColor(name = '') {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
-}
+import { getAvatarColor, getInitials, useCreateGroupDialogLogic } from '../handler/componentLogic'
 
 /* ─── Slide-up transition for mobile fullscreen ── */
 const SlideUp = React.forwardRef(function SlideUp(props, ref) {
@@ -48,96 +26,47 @@ function CreateGroupDialog({
   groupCreating, groupError,
   handleCreateGroup,
 }) {
-  const dispatch = useDispatch()
-  const theme = useTheme()
-  const isMobileOrTablet = useMediaQuery(theme.breakpoints.down('md')) // < 900px
-  const [uploadingAvatar, setUploadingAvatar] = useState(false)
-  const [photoError, setPhotoError] = useState('')
-  const [toastOpen, setToastOpen] = useState(false)
-
-  const [step, setStep] = useState(1)          // 1 = select members, 2 = group details
-  const [memberSearch, setMemberSearch] = useState('')
-  const [description, setDescription] = useState('')
-  const [adminOnlyMessages, setAdminOnlyMessages] = useState(false)
-  const [groupPhoto, setGroupPhoto] = useState(null)   // { file, previewUrl }
-  const photoInputRef = useRef(null)
-
-  // Revoke the object URL when dialog closes to avoid memory leaks
-  React.useEffect(() => {
-    if (!open && groupPhoto?.previewUrl) {
-      URL.revokeObjectURL(groupPhoto.previewUrl)
-      setGroupPhoto(null)
-      setPhotoError('')
-    }
-  }, [open])
-
-  const handlePhotoChange = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
-      setPhotoError('Choose a JPEG, PNG, GIF, or WebP image.')
-      e.target.value = ''
-      return
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      setPhotoError('Group images must be 10 MB or smaller.')
-      e.target.value = ''
-      return
-    }
-    setPhotoError('')
-    if (groupPhoto?.previewUrl) URL.revokeObjectURL(groupPhoto.previewUrl)
-    setGroupPhoto({ file, previewUrl: URL.createObjectURL(file) })
-    // Reset input so picking the same file again still triggers onChange
-    e.target.value = ''
-  }
-
-  // Reset to step 1 when dialog opens
-  React.useEffect(() => {
-    if (open) {
-      setStep(1)
-      setMemberSearch('')
-      setDescription('')
-      setAdminOnlyMessages(false)
-      setGroupPhoto(null)
-    }
-  }, [open])
-
-  /* ── filtered contacts ── */
-  const filtered = useMemo(() => {
-    const q = memberSearch.toLowerCase()
-    return contacts.filter((c) =>
-      (c.name || '').toLowerCase().includes(q) ||
-      (c.email || '').toLowerCase().includes(q)
-    )
-  }, [contacts, memberSearch])
-
-  const selectedContacts = contacts.filter((c) => groupMemberIds.includes(c.id))
-
-  /* ── submit ── */
-  const onCreateGroup = async () => {
-    let uploadedAvatarUrl = null
-    if (groupPhoto?.file) {
-      setUploadingAvatar(true)
-      setPhotoError('')
-      try {
-        const result = await dispatch(uploadGroupAvatar({ file: groupPhoto.file })).unwrap()
-        uploadedAvatarUrl = result?.avatarUrl || null
-      } catch (err) {
-        setUploadingAvatar(false)
-        setPhotoError(typeof err === 'string' ? err : 'Failed to upload group avatar')
-        return
-      }
-      setUploadingAvatar(false)
-    }
-
-    handleCreateGroup({
-      name: groupName.trim(),
-      memberIds: groupMemberIds,
-      avatarUrl: uploadedAvatarUrl,
-      description: description.trim() || undefined,
-      adminOnlyMessages,
-    })
-  }
+  const {
+    isMobileOrTablet,
+    uploadingAvatar,
+    photoError,
+    toastOpen,
+    step,
+    memberSearch,
+    description,
+    adminOnlyMessages,
+    groupPhoto,
+    photoInputRef,
+    filteredContactRows,
+    selectedContacts,
+    allFilteredSelected,
+    someFilteredSelected,
+    selectedNames,
+    handlePhotoChange,
+    handleCreateGroup: onCreateGroup,
+    handleMemberSearchChange,
+    handleGroupNameChange,
+    handleDescriptionChange,
+    handleAdminOnlyMessagesChange,
+    getToggleMemberHandler,
+    handleClearSelectedMembers,
+    handleToggleFilteredSelection,
+    handleNextStep,
+    handlePreviousStep,
+    handleHeaderBack,
+    openPhotoPicker,
+    handleRemovePhoto,
+    handleToastClose,
+  } = useCreateGroupDialogLogic({
+    open,
+    onClose,
+    contacts,
+    groupName,
+    setGroupName,
+    groupMemberIds,
+    toggleGroupMember,
+    handleCreateGroup,
+  })
 
   /* ══════════════
      STEP 1 BODY
@@ -151,7 +80,7 @@ function CreateGroupDialog({
           size="small"
           placeholder="Search name or email"
           value={memberSearch}
-          onChange={(e) => setMemberSearch(e.target.value)}
+          onChange={handleMemberSearchChange}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -195,7 +124,7 @@ function CreateGroupDialog({
             color="#3C4F4A"
             fontWeight={600}
             sx={{ cursor: 'pointer', textDecoration: 'underline' }}
-            onClick={() => selectedContacts.forEach((c) => toggleGroupMember(c.id))}
+            onClick={handleClearSelectedMembers}
           >
             Clear all
           </Typography>
@@ -205,10 +134,7 @@ function CreateGroupDialog({
       {/* Contact list */}
       <Box sx={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {/* Section label + Select all checkbox */}
-        {filtered.length > 0 && (() => {
-          const allSelected = filtered.every((c) => groupMemberIds.includes(c.id))
-          const someSelected = filtered.some((c) => groupMemberIds.includes(c.id))
-          return (
+        {filteredContactRows.length > 0 && (
             <Box
               sx={{
                 px: 2, py: 0.5,
@@ -217,22 +143,16 @@ function CreateGroupDialog({
               }}
             >
               <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                Contacts · {filtered.length}
+                Contacts · {filteredContactRows.length}
               </Typography>
               <Box
                 sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => {
-                  if (allSelected) {
-                    filtered.forEach((c) => { if (groupMemberIds.includes(c.id)) toggleGroupMember(c.id) })
-                  } else {
-                    filtered.forEach((c) => { if (!groupMemberIds.includes(c.id)) toggleGroupMember(c.id) })
-                  }
-                }}
+                onClick={handleToggleFilteredSelection}
               >
                 <Checkbox
                   size="small"
-                  checked={allSelected}
-                  indeterminate={!allSelected && someSelected}
+                  checked={allFilteredSelected}
+                  indeterminate={!allFilteredSelected && someFilteredSelected}
                   disableRipple
                   icon={<CheckBoxOutlineBlank sx={{ fontSize: 18, color: '#B0BDB9' }} />}
                   checkedIcon={<CheckBox sx={{ fontSize: 18, color: '#2D4A44' }} />}
@@ -240,24 +160,23 @@ function CreateGroupDialog({
                   sx={{ p: 0 }}
                 />
                 <Typography variant="caption" fontWeight={600} sx={{ color: '#3C4F4A' }}>
-                  {allSelected ? 'Deselect all' : 'Select all'}
+                  {allFilteredSelected ? 'Deselect all' : 'Select all'}
                 </Typography>
               </Box>
             </Box>
-          )
-        })()}
+        )}
 
-        {filtered.length === 0 ? (
+        {filteredContactRows.length === 0 ? (
           <Box sx={{ px: 2, py: 4, textAlign: 'center' }}>
             <Typography variant="body2" color="text.disabled">No contacts found</Typography>
           </Box>
         ) : (
-          filtered.map((c) => {
-            const selected = groupMemberIds.includes(c.id)
+          filteredContactRows.map((c) => {
+            const selected = c.selected
             return (
               <Box
                 key={c.id}
-                onClick={() => toggleGroupMember(c.id)}
+                onClick={getToggleMemberHandler(c.id)}
                 sx={{
                   display: 'flex',
                   alignItems: 'center',
@@ -274,7 +193,7 @@ function CreateGroupDialog({
                   sx={{
                     width: 42,
                     height: 42,
-                    bgcolor: avatarColor(c.name),
+                    bgcolor: getAvatarColor(c.name),
                     fontSize: '0.85rem',
                     fontWeight: 600,
                     color: '#fff',
@@ -282,7 +201,7 @@ function CreateGroupDialog({
                     flexShrink: 0,
                   }}
                 >
-                  {initials(c.name)}
+                  {getInitials(c.name)}
                 </Avatar>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="body2" fontWeight={500} noWrap>{c.name}</Typography>
@@ -332,13 +251,7 @@ function CreateGroupDialog({
           fullWidth
           variant="contained"
           disabled={groupMemberIds.length === 0}
-          onClick={() => {
-            if (groupMemberIds.length < 2) {
-              setToastOpen(true)
-              return
-            }
-            setStep(2)
-          }}
+          onClick={handleNextStep}
           endIcon={<span style={{ fontSize: '1rem' }}>→</span>}
           sx={{
             bgcolor: '#2D4A44',
@@ -380,7 +293,7 @@ function CreateGroupDialog({
           />
           <Box
             sx={{ position: 'relative', cursor: 'pointer' }}
-            onClick={() => photoInputRef.current?.click()}
+            onClick={openPhotoPicker}
           >
             <Avatar
               src={groupPhoto?.previewUrl || undefined}
@@ -416,7 +329,7 @@ function CreateGroupDialog({
             variant="caption"
             color="text.secondary"
             sx={{ mt: 1, cursor: 'pointer' }}
-            onClick={() => photoInputRef.current?.click()}
+            onClick={openPhotoPicker}
           >
             {groupPhoto ? 'Change photo' : 'Add group photo'}
           </Typography>
@@ -424,10 +337,7 @@ function CreateGroupDialog({
             <Typography
               variant="caption"
               sx={{ color: '#c62828', cursor: 'pointer', mt: 0.25 }}
-              onClick={() => {
-                URL.revokeObjectURL(groupPhoto.previewUrl)
-                setGroupPhoto(null)
-              }}
+              onClick={handleRemovePhoto}
             >
               Remove
             </Typography>
@@ -443,7 +353,7 @@ function CreateGroupDialog({
           size="small"
           placeholder="e.g. Building A Garden Club"
           value={groupName}
-          onChange={(e) => setGroupName(e.target.value)}
+          onChange={handleGroupNameChange}
           inputProps={{ maxLength: 50 }}
           sx={{
             mb: 0.5,
@@ -469,7 +379,7 @@ function CreateGroupDialog({
           minRows={3}
           placeholder="What's this group about?"
           value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={handleDescriptionChange}
           sx={{
             mb: 2.5,
             '& .MuiOutlinedInput-root': {
@@ -503,7 +413,7 @@ function CreateGroupDialog({
           </Box>
           <Switch
             checked={adminOnlyMessages}
-            onChange={(e) => setAdminOnlyMessages(e.target.checked)}
+            onChange={handleAdminOnlyMessagesChange}
             size="small"
             sx={{
               mt: 0.25,
@@ -526,7 +436,7 @@ function CreateGroupDialog({
               Members · {groupMemberIds.length + 1}
             </Typography>
             <Box
-              onClick={() => setStep(1)}
+              onClick={handlePreviousStep}
               sx={{
                 display: 'flex',
                 alignItems: 'center',
@@ -549,18 +459,18 @@ function CreateGroupDialog({
                     width: 28,
                     height: 28,
                     fontSize: '0.65rem',
-                    bgcolor: avatarColor(c.name),
+                    bgcolor: getAvatarColor(c.name),
                     border: '2px solid #F5F7F6',
                     ml: i === 0 ? 0 : -1,
                     fontWeight: 600,
                   }}
                 >
-                  {initials(c.name)}
+                  {getInitials(c.name)}
                 </Avatar>
               ))}
             </Box>
             <Typography variant="caption" color="text.secondary">
-              You{selectedContacts.length > 0 && `, ${selectedContacts.map((c) => c.name?.split(' ')[0]).join(', ')}`}
+              You{selectedNames && `, ${selectedNames}`}
             </Typography>
           </Box>
         </Box>
@@ -625,7 +535,7 @@ function CreateGroupDialog({
     >
       <IconButton
         size="small"
-        onClick={step === 1 ? onClose : () => setStep(1)}
+        onClick={handleHeaderBack}
         sx={{ mr: 1, p: 0.5, color: '#3C4F4A' }}
       >
         <ArrowBackIos sx={{ fontSize: 16 }} />
@@ -663,7 +573,7 @@ function CreateGroupDialog({
     <Snackbar
       open={toastOpen}
       autoHideDuration={3500}
-      onClose={() => setToastOpen(false)}
+      onClose={handleToastClose}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       message="A group needs at least 2 other members. Please add more people."
       ContentProps={{

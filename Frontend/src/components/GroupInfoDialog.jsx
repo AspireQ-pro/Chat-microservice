@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react'
+import React from 'react'
 import {
   Box, Typography, Avatar, TextField, Button,
   CircularProgress, Alert, Dialog, Slide,
@@ -10,40 +10,13 @@ import {
   CameraAlt, Edit, PersonAdd, PersonRemove, ExitToApp,
   People, DeleteForever, AdminPanelSettings,
 } from '@mui/icons-material'
-import { useTheme, useMediaQuery } from '@mui/material'
-import { useDispatch } from 'react-redux'
 import AuthenticatedAvatar from '@/features/media/AuthenticatedAvatar'
 import {
-  updateGroupInfo,
-  addGroupMembers,
-  removeGroupMember,
-  leaveGroup,
-  uploadGroupAvatar,
-  deleteGroup,
-  promoteToAdmin,
-} from '@/provider/chatSlice'
-
-/* ─── helpers ─────────────────────────────────── */
-function initials(name = '') {
-  return name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
-}
-
-const AVATAR_COLORS = [
-  '#A8C5BD', '#B5C8E2', '#C8B5D4', '#D4C4A8', '#A8D4B5',
-  '#D4A8B5', '#B5D4C8', '#C8D4A8', '#A8B5D4', '#D4B5A8',
-]
-function avatarColor(name = '') {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
-}
-
-function formatJoinedDate(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  if (isNaN(d)) return ''
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
-}
+  formatJoinedDate,
+  getAvatarColor,
+  getInitials,
+  useGroupInfoDialogLogic,
+} from '../handler/componentLogic'
 
 const SlideUp = React.forwardRef(function SlideUp(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />
@@ -59,231 +32,61 @@ function GroupInfoDialog({
   currentUserId,
   contacts,
 }) {
-  const dispatch = useDispatch()
-  const theme = useTheme()
-  const isMobileOrTablet = useMediaQuery(theme.breakpoints.down('md'))
-
-  /* ── Derived data ── */
-  const members = room?.members || []
-  const createdById = room?.createdById || null
-  // isAdmin: true if the current user has the 'admin' role in this group's members list.
-  // Falls back to createdById check for rooms not yet migrated.
-  const myMembership = members.find((m) => m.userId === currentUserId)
-  const isAdmin = myMembership?.role === 'admin' || !!(currentUserId && createdById && currentUserId === createdById)
-  // Keep isOwner as a named alias used in JSX (now means "is any admin")
-  const isOwner = isAdmin
-
-  /* ── View modes: 'info' | 'edit' | 'addMembers' ── */
-  const [view, setView] = useState('info')
-
-  /* ── Edit state ── */
-  const [editName, setEditName] = useState('')
-  const [editDescription, setEditDescription] = useState('')
-  const [editPhoto, setEditPhoto] = useState(null)
-  const [savedAvatarPreview, setSavedAvatarPreview] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
-  const photoInputRef = useRef(null)
-
-  /* ── Add-members state ── */
-  const [addSearch, setAddSearch] = useState('')
-  const [addIds, setAddIds] = useState([])
-  const [adding, setAdding] = useState(false)
-  const [addError, setAddError] = useState('')
-
-  /* ── Remove / leave / delete state ── */
-  const [removingId, setRemovingId] = useState(null)
-  const [leaving, setLeaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [actionError, setActionError] = useState('')
-
-  /* ── Promote to admin state ── */
-  const [promotingId, setPromotingId] = useState(null)
-
-  /* ── Avatar lightbox ── */
-  const [avatarLightbox, setAvatarLightbox] = useState(false)
-
-  /* ── Min-member warning (shown when removal would leave < 2 non-admin members) ── */
-  const [minMemberWarning, setMinMemberWarning] = useState(false)
-
-  /* ── Toast ── */
-  const [toast, setToast] = useState('')
-
-  // Reset local state when dialog opens
-  useEffect(() => {
-    if (open) {
-      setView('info')
-      setSaveError('')
-      setAddError('')
-      setActionError('')
-      setMinMemberWarning(false)
-      setAddIds([])
-      setAddSearch('')
-      setSavedAvatarPreview(null)
-    }
-  }, [open])
-
-  // Pre-fill edit fields when entering edit view
-  useEffect(() => {
-    if (view === 'edit') {
-      setEditName(room?.name || '')
-      setEditDescription(room?.description || '')
-      setEditPhoto(null)
-      setSaveError('')
-    }
-  }, [view, room])
-
-  // Cleanup object URLs
-  useEffect(() => {
-    if (!open) {
-      if (editPhoto?.previewUrl) {
-        URL.revokeObjectURL(editPhoto.previewUrl)
-        setEditPhoto(null)
-      }
-      if (savedAvatarPreview) {
-        URL.revokeObjectURL(savedAvatarPreview)
-        setSavedAvatarPreview(null)
-      }
-    }
-  }, [open])
-
-  /* ── Contacts eligible to be added (not already members) ── */
-  const memberUserIds = useMemo(() => new Set(members.map((m) => m.userId)), [members])
-  const addableContacts = useMemo(() => {
-    const q = addSearch.toLowerCase()
-    return contacts.filter(
-      (c) =>
-        !memberUserIds.has(c.id) &&
-        (!q || (c.name || '').toLowerCase().includes(q) || (c.email || '').toLowerCase().includes(q))
-    )
-  }, [contacts, memberUserIds, addSearch])
-
-  const selectedAddContacts = contacts.filter((c) => addIds.includes(c.id))
-
-  /* ── handlers ── */
-  const handlePhotoChange = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
-      setSaveError('Choose a JPEG, PNG, GIF, or WebP image.')
-      e.target.value = ''
-      return
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      setSaveError('Group images must be 10 MB or smaller.')
-      e.target.value = ''
-      return
-    }
-    setSaveError('')
-    if (editPhoto?.previewUrl) URL.revokeObjectURL(editPhoto.previewUrl)
-    setEditPhoto({ file, previewUrl: URL.createObjectURL(file) })
-    e.target.value = ''
-  }
-
-  const handleSaveInfo = async () => {
-    const name = editName.trim()
-    if (!name) { setSaveError('Group name cannot be empty'); return }
-    setSaving(true)
-    setSaveError('')
-    try {
-      let avatarUrl = undefined
-      const previewUrl = editPhoto?.previewUrl || null
-      if (editPhoto?.file) {
-        const result = await dispatch(uploadGroupAvatar({ file: editPhoto.file })).unwrap()
-        avatarUrl = result?.avatarUrl || undefined
-      }
-      const payload = { roomId: room.id, name }
-      if (editDescription !== (room?.description || '')) payload.description = editDescription
-      if (avatarUrl !== undefined) payload.avatarUrl = avatarUrl
-      await dispatch(updateGroupInfo(payload)).unwrap()
-      if (previewUrl) setSavedAvatarPreview(previewUrl)
-      setToast('Group info updated')
-      setView('info')
-    } catch (err) {
-      setSaveError(typeof err === 'string' ? err : err?.message || 'Failed to update group')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleAddMembers = async () => {
-    if (!addIds.length) return
-    setAdding(true)
-    setAddError('')
-    try {
-      await dispatch(addGroupMembers({ roomId: room.id, memberIds: addIds })).unwrap()
-      setToast(`${addIds.length} member${addIds.length > 1 ? 's' : ''} added`)
-      setAddIds([])
-      setAddSearch('')
-      setView('info')
-    } catch (err) {
-      setAddError(typeof err === 'string' ? err : err?.message || 'Failed to add members')
-    } finally {
-      setAdding(false)
-    }
-  }
-
-  const handleRemoveMember = async (userId) => {
-    // Count non-admin members that would remain after removal.
-    // Members with role='admin' (or the createdById) do not count toward the minimum.
-    const nonAdminAfterRemoval = members.filter(
-      (m) => m.role !== 'admin' && m.userId !== createdById && m.userId !== userId,
-    ).length
-    if (nonAdminAfterRemoval < 2) {
-      setMinMemberWarning(true)
-      return
-    }
-
-    setRemovingId(userId)
-    setActionError('')
-    setMinMemberWarning(false)
-    try {
-      await dispatch(removeGroupMember({ roomId: room.id, userId })).unwrap()
-      setToast('Member removed')
-    } catch (err) {
-      setActionError(typeof err === 'string' ? err : err?.message || 'Failed to remove member')
-    } finally {
-      setRemovingId(null)
-    }
-  }
-
-  const handleDeleteGroup = async () => {
-    setDeleting(true)
-    setActionError('')
-    try {
-      await dispatch(deleteGroup(room.id)).unwrap()
-      onClose()
-    } catch (err) {
-      setActionError(typeof err === 'string' ? err : err?.message || 'Failed to delete group')
-      setDeleting(false)
-    }
-  }
-
-  const handleLeave = async () => {
-    setLeaving(true)
-    setActionError('')
-    try {
-      await dispatch(leaveGroup(room.id)).unwrap()
-      onClose()
-    } catch (err) {
-      setActionError(typeof err === 'string' ? err : err?.message || 'Failed to leave group')
-    } finally {
-      setLeaving(false)
-    }
-  }
-
-  const handlePromoteToAdmin = async (userId) => {
-    setPromotingId(userId)
-    setActionError('')
-    try {
-      await dispatch(promoteToAdmin({ roomId: room.id, userId })).unwrap()
-      setToast('Member promoted to admin')
-    } catch (err) {
-      setActionError(typeof err === 'string' ? err : err?.message || 'Failed to promote member')
-    } finally {
-      setPromotingId(null)
-    }
-  }
+  const {
+    isMobileOrTablet,
+    members,
+    isOwner,
+    view,
+    editName,
+    editDescription,
+    editPhoto,
+    savedAvatarPreview,
+    saving,
+    saveError,
+    photoInputRef,
+    addSearch,
+    addIds,
+    adding,
+    addError,
+    leaving,
+    deleting,
+    actionError,
+    avatarLightbox,
+    minMemberWarning,
+    toast,
+    hasContactsToAdd,
+    addableContactRows,
+    selectedAddContacts,
+    memberRows,
+    isLastAdmin,
+    tooFewAfterLeave,
+    leaveBlocked,
+    leaveTooltip,
+    headerTitle,
+    handlePhotoChange,
+    handleSaveInfo,
+    handleAddMembers,
+    handleDeleteGroup,
+    handleLeave,
+    handleEditNameChange,
+    handleEditDescriptionChange,
+    handleAddSearchChange,
+    handleClearAddIds,
+    getRemoveAddIdHandler,
+    getToggleAddIdHandler,
+    getPromoteMemberHandler,
+    getRemoveMemberHandler,
+    openEditView,
+    openAddMembersView,
+    closeMinMemberWarning,
+    openAvatarLightbox,
+    closeAvatarLightbox,
+    closeToast,
+    removeEditPhoto,
+    openPhotoPicker,
+    handleHeaderBack,
+    stopPropagation,
+  } = useGroupInfoDialogLogic({ open, onClose, room, currentUserId, contacts })
 
   /* ─────────────────────────────────────────────
      VIEW: INFO
@@ -309,7 +112,7 @@ function GroupInfoDialog({
           <Box sx={{ position: 'relative' }}>
             <AuthenticatedAvatar
               src={savedAvatarPreview || room?.avatarUrl || undefined}
-              onClick={(savedAvatarPreview || room?.avatarUrl) ? () => setAvatarLightbox(true) : undefined}
+              onClick={(savedAvatarPreview || room?.avatarUrl) ? openAvatarLightbox : undefined}
               sx={{
                 width: 80,
                 height: 80,
@@ -319,12 +122,12 @@ function GroupInfoDialog({
                 cursor: (savedAvatarPreview || room?.avatarUrl) ? 'zoom-in' : 'default',
               }}
             >
-              {initials(room?.name || 'GR')}
+              {getInitials(room?.name || 'GR')}
             </AuthenticatedAvatar>
             {isOwner && (
               <Tooltip title="Edit group">
                 <Box
-                  onClick={() => setView('edit')}
+                  onClick={openEditView}
                   sx={{
                     position: 'absolute',
                     bottom: 0,
@@ -392,7 +195,7 @@ function GroupInfoDialog({
               <Tooltip title="Add members">
                 <IconButton
                   size="small"
-                  onClick={() => setView('addMembers')}
+                  onClick={openAddMembersView}
                   sx={{ color: '#3C4F4A', '&:hover': { bgcolor: '#EEF2F1' } }}
                 >
                   <PersonAdd sx={{ fontSize: 18 }} />
@@ -406,7 +209,7 @@ function GroupInfoDialog({
             <Alert
               severity="warning"
               sx={{ mb: 1.5, borderRadius: 2, py: 0.75, fontSize: '0.8rem', alignItems: 'flex-start' }}
-              onClose={() => setMinMemberWarning(false)}
+              onClose={closeMinMemberWarning}
             >
               <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5, fontSize: '0.8rem' }}>
                 A group must have at least 2 members besides the admins.
@@ -450,30 +253,10 @@ function GroupInfoDialog({
               overflow: 'hidden',
             }}
           >
-            {members
-              .slice()
-              .sort((a, b) => {
-                // Admins first (creator first among admins), then others alphabetically
-                const aIsAdmin = a.role === 'admin' || a.userId === createdById
-                const bIsAdmin = b.role === 'admin' || b.userId === createdById
-                if (aIsAdmin !== bIsAdmin) return aIsAdmin ? -1 : 1
-                // Within admins: creator first
-                if (aIsAdmin && bIsAdmin) {
-                  if (a.userId === createdById) return -1
-                  if (b.userId === createdById) return 1
-                }
-                return (a.user?.name || '').localeCompare(b.user?.name || '')
-              })
-              .map((m, idx) => {
-                const user = m.user || {}
-                const isMe = m.userId === currentUserId
-                const isMemberAdmin = m.role === 'admin' || m.userId === createdById
-                const isCreator = m.userId === createdById
-                const isRemoving = removingId === m.userId
-                const isPromoting = promotingId === m.userId
-
+            {memberRows.map((memberRow) => {
+                const { user, isMe, isMemberAdmin, isCreator, isRemoving, isPromoting, index } = memberRow
                 return (
-                  <Box key={m.userId || idx}>
+                  <Box key={memberRow.userId || index}>
                     <Box
                       sx={{
                         display: 'flex',
@@ -490,12 +273,12 @@ function GroupInfoDialog({
                           height: 40,
                           fontSize: '0.75rem',
                           fontWeight: 700,
-                          bgcolor: isMe ? '#2D4A44' : avatarColor(user.name || ''),
+                          bgcolor: isMe ? '#2D4A44' : getAvatarColor(user.name || ''),
                           color: '#fff',
                           flexShrink: 0,
                         }}
                       >
-                        {initials(user.name || '?')}
+                        {getInitials(user.name || '?')}
                       </AuthenticatedAvatar>
 
                       <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -534,7 +317,7 @@ function GroupInfoDialog({
                         </Box>
                         <Typography variant="caption" color="text.disabled" noWrap sx={{ display: 'block' }}>
                           {user.email || ''}
-                          {m.joinedAt ? ` · Joined ${formatJoinedDate(m.joinedAt)}` : ''}
+                          {memberRow.joinedAt ? ` · Joined ${formatJoinedDate(memberRow.joinedAt)}` : ''}
                         </Typography>
                       </Box>
 
@@ -545,7 +328,7 @@ function GroupInfoDialog({
                             <IconButton
                               size="small"
                               disabled={isPromoting || isRemoving}
-                              onClick={() => handlePromoteToAdmin(m.userId)}
+                              onClick={getPromoteMemberHandler(memberRow.userId)}
                               sx={{ color: '#2D4A44', '&:hover': { bgcolor: '#E8F5E9' } }}
                             >
                               {isPromoting
@@ -557,7 +340,7 @@ function GroupInfoDialog({
                             <IconButton
                               size="small"
                               disabled={isRemoving || isPromoting}
-                              onClick={() => handleRemoveMember(m.userId)}
+                              onClick={getRemoveMemberHandler(memberRow.userId)}
                               sx={{ color: '#c62828', '&:hover': { bgcolor: '#FEEBEE' } }}
                             >
                               {isRemoving
@@ -568,7 +351,7 @@ function GroupInfoDialog({
                         </Box>
                       )}
                     </Box>
-                    {idx < members.length - 1 && <Divider />}
+                    {index < members.length - 1 && <Divider />}
                   </Box>
                 )
               })}
@@ -578,19 +361,7 @@ function GroupInfoDialog({
         {/* Leave group — available to all members including admins.
             Blocked only when the current user is the sole remaining admin
             (leaving would make the group unmanageable). */}
-        {(() => {
-          const adminCount = members.filter((m) => m.role === 'admin').length
-          const isLastAdmin = isAdmin && adminCount <= 1
-          // A group must keep at least 3 members — leaving from exactly 3 would drop it to 2.
-          const tooFewAfterLeave = members.length <= 3
-          const leaveBlocked = isLastAdmin || tooFewAfterLeave
-          const leaveTooltip = isLastAdmin
-            ? 'Promote another member to admin before leaving'
-            : tooFewAfterLeave
-            ? 'A group must have at least 3 members. Add more members or delete the group.'
-            : ''
-          return (
-            <Box sx={{ px: 2.5, pt: 1.5, pb: 3 }}>
+        <Box sx={{ px: 2.5, pt: 1.5, pb: 3 }}>
               <Tooltip
                 title={leaveTooltip}
                 disableHoverListener={!leaveBlocked}
@@ -630,9 +401,7 @@ function GroupInfoDialog({
                   A group must have at least 3 members. Add more members or delete the group.
                 </Typography>
               )}
-            </Box>
-          )
-        })()}
+        </Box>
 
         <Box sx={{ pb: 2 }} />
       </Box>
@@ -657,7 +426,7 @@ function GroupInfoDialog({
           />
           <Box
             sx={{ position: 'relative', cursor: 'pointer' }}
-            onClick={() => photoInputRef.current?.click()}
+            onClick={openPhotoPicker}
           >
             <AuthenticatedAvatar
               src={editPhoto?.previewUrl || room?.avatarUrl || undefined}
@@ -687,7 +456,7 @@ function GroupInfoDialog({
             variant="caption"
             color="text.secondary"
             sx={{ mt: 1, cursor: 'pointer' }}
-            onClick={() => photoInputRef.current?.click()}
+            onClick={openPhotoPicker}
           >
             {editPhoto ? 'Change photo' : 'Change group photo'}
           </Typography>
@@ -695,7 +464,7 @@ function GroupInfoDialog({
             <Typography
               variant="caption"
               sx={{ color: '#c62828', cursor: 'pointer', mt: 0.25 }}
-              onClick={() => { URL.revokeObjectURL(editPhoto.previewUrl); setEditPhoto(null) }}
+              onClick={removeEditPhoto}
             >
               Remove
             </Typography>
@@ -709,7 +478,7 @@ function GroupInfoDialog({
         <TextField
           fullWidth size="small"
           value={editName}
-          onChange={(e) => setEditName(e.target.value)}
+          onChange={handleEditNameChange}
           inputProps={{ maxLength: 50 }}
           sx={{
             mb: 0.5,
@@ -733,7 +502,7 @@ function GroupInfoDialog({
           fullWidth multiline minRows={3}
           placeholder="What's this group about?"
           value={editDescription}
-          onChange={(e) => setEditDescription(e.target.value)}
+          onChange={handleEditDescriptionChange}
           inputProps={{ maxLength: 500 }}
           sx={{
             mb: 2.5,
@@ -783,7 +552,7 @@ function GroupInfoDialog({
           fullWidth size="small"
           placeholder="Search name or email"
           value={addSearch}
-          onChange={(e) => setAddSearch(e.target.value)}
+          onChange={handleAddSearchChange}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -811,7 +580,7 @@ function GroupInfoDialog({
             <Typography
               variant="caption" color="#3C4F4A" fontWeight={600}
               sx={{ cursor: 'pointer', textDecoration: 'underline' }}
-              onClick={() => setAddIds([])}
+              onClick={handleClearAddIds}
             >
               Clear all
             </Typography>
@@ -821,12 +590,12 @@ function GroupInfoDialog({
               <Chip
                 key={c.id} size="small"
                 avatar={
-                  <Avatar sx={{ bgcolor: avatarColor(c.name), fontSize: '0.6rem', width: 22, height: 22 }}>
-                    {initials(c.name)}
+                  <Avatar sx={{ bgcolor: getAvatarColor(c.name), fontSize: '0.6rem', width: 22, height: 22 }}>
+                    {getInitials(c.name)}
                   </Avatar>
                 }
                 label={c.name?.split(' ')[0] || c.name}
-                onDelete={() => setAddIds((prev) => prev.filter((id) => id !== c.id))}
+                onDelete={getRemoveAddIdHandler(c.id)}
                 deleteIcon={<Close sx={{ fontSize: '14px !important' }} />}
                 sx={{
                   bgcolor: '#EEF2F1', border: '1px solid #D5DCD9',
@@ -841,23 +610,21 @@ function GroupInfoDialog({
 
       {/* Contact list */}
       <Box sx={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        {addableContacts.length === 0 ? (
+        {addableContactRows.length === 0 ? (
           <Box sx={{ px: 2, py: 4, textAlign: 'center' }}>
             <Typography variant="body2" color="text.disabled">
-              {contacts.filter((c) => !memberUserIds.has(c.id)).length === 0
+              {!hasContactsToAdd
                 ? 'All contacts are already in this group'
                 : 'No contacts found'}
             </Typography>
           </Box>
         ) : (
-          addableContacts.map((c) => {
-            const selected = addIds.includes(c.id)
+          addableContactRows.map((c) => {
+            const selected = c.selected
             return (
               <Box
                 key={c.id}
-                onClick={() => setAddIds((prev) =>
-                  prev.includes(c.id) ? prev.filter((id) => id !== c.id) : [...prev, c.id]
-                )}
+                onClick={getToggleAddIdHandler(c.id)}
                 sx={{
                   display: 'flex', alignItems: 'center',
                   px: 2, py: 1.25, cursor: 'pointer',
@@ -870,12 +637,12 @@ function GroupInfoDialog({
                 <Avatar
                   sx={{
                     width: 42, height: 42,
-                    bgcolor: avatarColor(c.name),
+                    bgcolor: getAvatarColor(c.name),
                     fontSize: '0.85rem', fontWeight: 600, color: '#fff',
                     mr: 1.5, flexShrink: 0,
                   }}
                 >
-                  {initials(c.name)}
+                  {getInitials(c.name)}
                 </Avatar>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="body2" fontWeight={500} noWrap>{c.name}</Typography>
@@ -930,11 +697,6 @@ function GroupInfoDialog({
   /* ─────────────────────────────────────────────
      HEADER
   ───────────────────────────────────────────── */
-  const headerTitle =
-    view === 'edit' ? 'Edit group' :
-    view === 'addMembers' ? 'Add members' :
-    'Group info'
-
   const Header = (
     <Box
       sx={{
@@ -946,7 +708,7 @@ function GroupInfoDialog({
     >
       <IconButton
         size="small"
-        onClick={view === 'info' ? onClose : () => setView('info')}
+        onClick={handleHeaderBack}
         sx={{ mr: 1, p: 0.5, color: '#3C4F4A' }}
       >
         <ArrowBackIos sx={{ fontSize: 16 }} />
@@ -981,7 +743,7 @@ function GroupInfoDialog({
     <Snackbar
       open={!!toast}
       autoHideDuration={3000}
-      onClose={() => setToast('')}
+      onClose={closeToast}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       message={toast}
       ContentProps={{
@@ -994,7 +756,7 @@ function GroupInfoDialog({
   const AvatarLightbox = (
     <Dialog
       open={avatarLightbox}
-      onClose={() => setAvatarLightbox(false)}
+      onClose={closeAvatarLightbox}
       maxWidth={false}
       PaperProps={{
         sx: {
@@ -1007,17 +769,17 @@ function GroupInfoDialog({
         },
       }}
       slotProps={{ backdrop: { sx: { bgcolor: 'rgba(0,0,0,0.85)' } } }}
-      onClick={() => setAvatarLightbox(false)}
+      onClick={closeAvatarLightbox}
     >
-      <Box sx={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+      <Box sx={{ position: 'relative' }} onClick={stopPropagation}>
         <AuthenticatedAvatar
           src={savedAvatarPreview || room?.avatarUrl || undefined}
           sx={{ width: 280, height: 280, fontSize: '5rem', bgcolor: '#7e57c2' }}
         >
-          {initials(room?.name || 'GR')}
+          {getInitials(room?.name || 'GR')}
         </AuthenticatedAvatar>
         <IconButton
-          onClick={() => setAvatarLightbox(false)}
+          onClick={closeAvatarLightbox}
           size="small"
           sx={{
             position: 'absolute', top: -12, right: -12,

@@ -1,17 +1,14 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { useSelector } from 'react-redux'
 import {
   Box, Typography, Button, IconButton, TextField, Tooltip,
   CircularProgress,
 } from '@mui/material'
-import { API_BASE } from '../features/media/upload'
 import {
   Check, AccessTime, Close, Send,
   Download, InsertDriveFile, PictureAsPdf, TableChart, Slideshow,
   Description, AudioFile, VideoFile, Archive, TextSnippet,
 } from '@mui/icons-material'
-import { openFile, downloadFile, resolveMime } from '../utils/fileOpener'
 import MessageActionsMenu from './MessageActionsMenu'
+import { useMessageBubbleLogic } from '../handler/componentLogic'
 
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
 function Ticks({ status }) {
@@ -53,240 +50,43 @@ function FileIcon({ fileName, fileType, sx }) {
   return <InsertDriveFile sx={{ ...iconSx, color: '#546e7a' }} />
 }
 
-/* ─── Format file size ───────────────────────────────────────────────────── */
-function formatFileSize(bytes) {
-  if (!bytes || bytes <= 0) return ''
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-/* ─── Auth fetch helper (used only for the media blob load) ──────────────── */
-function authFetch(url, token) {
-  let headers = {}
-  try {
-    const backendOrigin = new URL(API_BASE, window.location.href).origin
-    if (token && new URL(url, window.location.href).origin === backendOrigin) {
-      headers = { Authorization: `Bearer ${token}` }
-    }
-  } catch { /* ignore */ }
-  return fetch(url, { headers })
-}
-
 /* ─── Main component ──────────────────────────────────────────────────────── */
 function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
-  const failed = message.mine && message.status === 'failed'
-  const token  = useSelector((state) => state.auth.token)
-
-  /* ── Media blob state — images/audio/video need auth so we load as blob: ── */
-  const [mediaBlobUrl, setMediaBlobUrl] = useState(null)
-  const [mediaLoading, setMediaLoading] = useState(false)
-  const [mediaError, setMediaError]     = useState(false)
-
-  const isImage = message.fileType === 'image'
-  const isAudio = message.fileType === 'audio'
-  const isVideo = message.fileType === 'video'
-  const isFile  = Boolean(message.fileUrl) && !isImage && !isAudio && !isVideo
-
-  /* ── Stable backend proxy URL ── */
-  const proxyUrl = useCallback(() => {
-    if (!message.fileUrl) return null
-    try {
-      const parsed = new URL(message.fileUrl, window.location.href)
-      const backendOrigin = new URL(API_BASE, window.location.href).origin
-      if (parsed.origin === backendOrigin && parsed.pathname.includes('/uploads/')) {
-        return message.fileUrl
-      }
-      if (!message.roomId) return message.fileUrl
-      const filename = parsed.pathname.split('/').pop()
-      if (!filename) return message.fileUrl
-      return `${API_BASE}/rooms/${message.roomId}/uploads/${filename}`
-    } catch {
-      return message.fileUrl
-    }
-  }, [message.fileUrl, message.roomId])
-
-  /* ── Fetch media blob for inline rendering (images, audio, video) ──
-     Auth is required because the backend proxy URL needs a JWT header.
-     The blob is turned into an object URL and used as the src for the
-     inline <img>, <audio>, and <video> elements.
-     Falls back to the canonical proxy URL if the stored fileUrl 404s
-     (handles legacy records where fileUrl differs from the proxy path). ── */
-  const loadMedia = useCallback(() => {
-    const needsBlob = isImage || isAudio || isVideo
-    if (!needsBlob || !message.fileUrl || !token || message.isDeleted) return undefined
-
-    const controller = new AbortController()
-    setMediaLoading(true)
-    setMediaError(false)
-    let objectUrl = null
-
-    const doFetch = (url) => authFetch(url, token)
-
-    doFetch(message.fileUrl)
-      .then((r) => {
-        if (!r.ok) {
-          const proxy = proxyUrl()
-          if (proxy && proxy !== message.fileUrl) {
-            return doFetch(proxy).then((r2) => {
-              if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
-              return r2
-            })
-          }
-          throw new Error(`HTTP ${r.status}`)
-        }
-        return r
-      })
-      .then((r) => r.blob())
-      .then((blob) => {
-        if (controller.signal.aborted) return
-        objectUrl = URL.createObjectURL(blob)
-        setMediaBlobUrl(objectUrl)
-        setMediaLoading(false)
-      })
-      .catch((e) => {
-        if (e.name !== 'AbortError') {
-          console.error('[MessageBubble] media fetch error:', e)
-          if (!controller.signal.aborted) {
-            setMediaError(true)
-            setMediaLoading(false)
-          }
-        }
-      })
-
-    return () => {
-      controller.abort()
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [isImage, isAudio, isVideo, message.fileUrl, token, message.isDeleted, proxyUrl])
-
-  useEffect(() => {
-    setMediaBlobUrl(null)
-    setMediaError(false)
-    const cleanup = loadMedia()
-    return cleanup
-  }, [loadMedia])
-
-  /* ── Open file via the native platform waterfall ──────────────────────────
-     Delegates entirely to openFile() in utils/fileOpener.js:
-       1. Android bridge  → OS app-chooser intent
-       2. iOS bridge      → share / open-in sheet
-       3. Web Share API   → mobile OS share sheet (iOS 15+, Android Chrome)
-       4. Blob → new tab  → browser renders inline (PDF, image, video, audio,
-                            text) or hands off to the OS handler (docx, zip…)
-     Nothing here auto-downloads. Download is always a separate explicit action.
-  ── */
-  const [opening, setOpening] = useState(false)
-
-  const handleOpenFile = useCallback(async (e) => {
-    e?.stopPropagation()
-    if (opening) return
-    const url = proxyUrl()
-    if (!url) return
-    setOpening(true)
-    try {
-      const mime = resolveMime(message.mimeType, message.fileName || '')
-      await openFile({
-        url,
-        fileName: message.fileName || url.split('/').pop().split('?')[0],
-        mimeType: mime,
-        fileType: message.fileType,
-        token,
-      })
-    } catch (err) {
-      console.warn('[MessageBubble] openFile error', err)
-    } finally {
-      setOpening(false)
-    }
-  }, [opening, proxyUrl, message.mimeType, message.fileName, message.fileType, token])
-
-  /* ── Open image: if the blob is already loaded, open that object URL
-     directly — avoids a redundant round-trip to the backend.
-     Falls back to the full openFile waterfall if the blob isn't ready. ── */
-  const handleOpenImage = useCallback((e) => {
-    e?.stopPropagation()
-    if (mediaBlobUrl) {
-      window.open(mediaBlobUrl, '_blank', 'noopener,noreferrer')
-    } else {
-      handleOpenFile(e)
-    }
-  }, [mediaBlobUrl, handleOpenFile])
-
-  /* ── Explicit download — uses downloadFile() from fileOpener ── */
-  const [downloading, setDownloading] = useState(false)
-  const handleDownload = useCallback(async (e) => {
-    e?.stopPropagation()
-    if (downloading) return
-    const url = proxyUrl()
-    if (!url) return
-    const fileName = message.fileName || url.split('/').pop().split('?')[0] || 'download'
-    setDownloading(true)
-    try {
-      await downloadFile(url, fileName, token)
-    } catch (err) {
-      console.error('[MessageBubble] download error', err)
-    } finally {
-      setDownloading(false)
-    }
-  }, [downloading, proxyUrl, token, message.fileName])
-
-  /* ── Context menu (right-click desktop / long-press mobile) ── */
-  const [menuAnchor, setMenuAnchor] = useState(null)
-  const longPressTimer = useRef(null)
-
-  const openMenu = useCallback((e) => {
-    e.preventDefault()
-    if (message.isDeleted || message.id?.startsWith('optimistic-')) return
-    setMenuAnchor(e.currentTarget)
-  }, [message.isDeleted, message.id])
-
-  const closeMenu = () => setMenuAnchor(null)
-
-  const onTouchStart = useCallback((e) => {
-    if (message.isDeleted || message.id?.startsWith('optimistic-')) return
-    longPressTimer.current = setTimeout(() => {
-      setMenuAnchor(e.currentTarget ?? e.target)
-    }, 500)
-  }, [message.isDeleted, message.id])
-
-  const onTouchEnd = useCallback(() => {
-    if (longPressTimer.current) clearTimeout(longPressTimer.current)
-  }, [])
-
-  /* ── Inline edit ── */
-  const [editing, setEditing]     = useState(false)
-  const [editValue, setEditValue] = useState('')
-  const editInputRef              = useRef(null)
-
-  const startEdit = () => {
-    setEditValue(message.text)
-    setEditing(true)
-    closeMenu()
-    setTimeout(() => editInputRef.current?.focus(), 50)
-  }
-
-  const cancelEdit = () => { setEditing(false); setEditValue('') }
-
-  const submitEdit = () => {
-    const trimmed = editValue.trim()
-    if (!trimmed || trimmed === message.text) { cancelEdit(); return }
-    onEdit?.(message.id, trimmed)
-    setEditing(false)
-    setEditValue('')
-  }
-
-  const handleEditKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit() }
-    if (e.key === 'Escape') cancelEdit()
-  }
-
-  /* ── Derived display values ── */
-  const isTextOnly  = !message.fileUrl && message.messageType === 'text'
-  const displayName = message.fileName
-    || (message.fileUrl ? decodeURIComponent(message.fileUrl.split('/').pop().split('?')[0]) : '')
-  const displaySize = formatFileSize(message.fileSize)
-  const iconColor   = message.mine ? 'rgba(255,255,255,0.85)' : '#3C4F4A'
-  const mutedColor  = message.mine ? 'rgba(255,255,255,0.7)'  : '#757575'
+  const {
+    failed,
+    isImage,
+    isAudio,
+    isVideo,
+    isFile,
+    mediaBlobUrl,
+    mediaLoading,
+    mediaError,
+    retryMedia,
+    opening,
+    handleOpenFile,
+    handleOpenImage,
+    downloading,
+    handleDownload,
+    menuAnchor,
+    openMenu,
+    closeMenu,
+    onTouchStart,
+    onTouchEnd,
+    editing,
+    editValue,
+    editInputRef,
+    startEdit,
+    cancelEdit,
+    submitEdit,
+    handleEditChange,
+    handleEditKeyDown,
+    handleRetry,
+    isTextOnly,
+    displayName,
+    displaySize,
+    iconColor,
+    mutedColor,
+  } = useMessageBubbleLogic({ message, onRetry, onEdit })
 
   return (
     <Box
@@ -341,7 +141,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
               inputRef={editInputRef}
               fullWidth multiline maxRows={6} size="small"
               value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
+              onChange={handleEditChange}
               onKeyDown={handleEditKeyDown}
               variant="standard"
               sx={{
@@ -393,7 +193,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
               ) : mediaError ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}>
                   <Typography variant="caption" sx={{ opacity: 0.7 }}>Image unavailable</Typography>
-                  <Button size="small" onClick={() => { setMediaError(false); loadMedia() }}
+                  <Button size="small" onClick={retryMedia}
                     sx={{ minWidth: 0, p: 0, fontSize: '0.65rem', textTransform: 'none', color: iconColor }}>
                     Retry
                   </Button>
@@ -461,7 +261,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
               ) : mediaError ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}>
                   <Typography variant="caption" sx={{ opacity: 0.7 }}>Audio unavailable</Typography>
-                  <Button size="small" onClick={() => { setMediaError(false); loadMedia() }}
+                  <Button size="small" onClick={retryMedia}
                     sx={{ minWidth: 0, p: 0, fontSize: '0.65rem', textTransform: 'none', color: iconColor }}>Retry</Button>
                 </Box>
               ) : mediaBlobUrl ? (
@@ -488,7 +288,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
               ) : mediaError ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}>
                   <Typography variant="caption" sx={{ opacity: 0.7 }}>Video unavailable</Typography>
-                  <Button size="small" onClick={() => { setMediaError(false); loadMedia() }}
+                  <Button size="small" onClick={retryMedia}
                     sx={{ minWidth: 0, p: 0, fontSize: '0.65rem', textTransform: 'none', color: iconColor }}>Retry</Button>
                 </Box>
               ) : mediaBlobUrl ? (
@@ -587,7 +387,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
       {failed && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25 }}>
           <Typography variant="caption" sx={{ color: '#c62828', fontSize: '0.65rem' }}>Not delivered</Typography>
-          <Button size="small" onClick={() => onRetry?.(message)}
+          <Button size="small" onClick={handleRetry}
             sx={{ minWidth: 0, p: 0, fontSize: '0.65rem', textTransform: 'none' }}>
             Retry
           </Button>

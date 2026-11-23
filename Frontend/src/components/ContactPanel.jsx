@@ -1,4 +1,3 @@
-import React, { useState } from "react";
 import {
   Box,
   Typography,
@@ -15,9 +14,9 @@ import {
 } from "@mui/icons-material";
 import ContactItem from "./ContactItem";
 import GroupItem from "./GroupItem";
-import { useSelector } from "react-redux";
+import { useContactPanelLogic } from "../handler/componentLogic";
 
-function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, handleSelectRoom, onGroupInfoClick }) {
+function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, getRoomSelectHandler, onGroupInfoClick }) {
   return (
     <>
       {/* Groups section header with add button */}
@@ -77,7 +76,7 @@ function GroupsList({ groupRooms, activeRoomId, unreadCounts, openGroupDialog, h
               room={room}
               active={room.id === activeRoomId}
               unread={unreadCounts[room.id] || 0}
-              onClick={() => handleSelectRoom(room)}
+              onClick={getRoomSelectHandler(room)}
               onInfoClick={onGroupInfoClick}
             />
           ))
@@ -104,31 +103,28 @@ function ContactPanel({
   setShowPanel,
   onGroupInfoClick,
 }) {
-  const user = useSelector((s) => s.auth.user);
-  const allowGroupChat = Boolean(user?.allowGroupChat);
-  const allowDirectChat = Boolean(user?.allowDirectChat);
-  const showTabs = allowGroupChat && allowDirectChat;
-
-  const [activeTab, setActiveTab] = useState(0); // 0 = Direct Chats, 1 = Groups
-
-  const searchLower = (search || "").trim().toLowerCase();
-  const groupRooms = rooms
-    .filter((room) => room.isGroup)
-    .filter((room) => !searchLower || (room.name || "").toLowerCase().includes(searchLower))
-    .slice()
-    .sort((a, b) =>
-      new Date(b.lastMessageAt || b.createdAt) -
-      new Date(a.lastMessageAt || a.createdAt)
-    );
-
-  const searchPlaceholder =
-    allowGroupChat && !allowDirectChat
-      ? "Search groups"
-      : !allowGroupChat && allowDirectChat
-        ? "Search contacts"
-        : activeTab === 1
-          ? "Search groups"
-          : "Search contacts";
+  const {
+    allowGroupChat,
+    allowDirectChat,
+    showTabs,
+    activeTab,
+    groupRooms,
+    searchPlaceholder,
+    title,
+    handleBack,
+    handleSearchChange,
+    showDirectTab,
+    showGroupsTab,
+    getRoomSelectHandler,
+    getContactSelectHandler,
+  } = useContactPanelLogic({
+    search,
+    setSearch,
+    rooms,
+    setShowPanel,
+    handleSelectContact,
+    handleSelectRoom,
+  });
 
   return (
     <Box
@@ -159,13 +155,7 @@ function ContactPanel({
         {isMobile && (
           <IconButton
             size="small"
-            onClick={() => {
-              if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: "CHAT_GO_BACK" }, "*");
-              } else {
-                setShowPanel && setShowPanel(false);
-              }
-            }}
+            onClick={handleBack}
             sx={{ p: 1, minWidth: 36, minHeight: 36, lineHeight: 1 }}
           >
             <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
@@ -182,11 +172,7 @@ function ContactPanel({
             flex: 1,
           }}
         >
-          {allowGroupChat && !allowDirectChat
-            ? "Group Chats"
-            : !allowGroupChat && allowDirectChat
-              ? "Individual Chats"
-              : "Chats"}
+          {title}
         </Typography>
       </Box>
 
@@ -208,7 +194,7 @@ function ContactPanel({
             size="small"
             placeholder={searchPlaceholder}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={handleSearchChange}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start" sx={{ mr: 0 }}>
@@ -270,7 +256,7 @@ function ContactPanel({
             }}
           >
             <Box
-              onClick={() => setActiveTab(0)}
+              onClick={showDirectTab}
               role="button"
               tabIndex={0}
               sx={{
@@ -296,7 +282,7 @@ function ContactPanel({
               Direct Chats
             </Box>
             <Box
-              onClick={() => setActiveTab(1)}
+              onClick={showGroupsTab}
               role="button"
               tabIndex={0}
               sx={{
@@ -343,7 +329,7 @@ function ContactPanel({
             activeRoomId={activeRoomId}
             unreadCounts={unreadCounts}
             openGroupDialog={openGroupDialog}
-            handleSelectRoom={handleSelectRoom}
+            getRoomSelectHandler={getRoomSelectHandler}
             onGroupInfoClick={onGroupInfoClick}
           />
         ) : (
@@ -363,7 +349,7 @@ function ContactPanel({
                   active={false}
                   lastMessage={getLastMessage(contact.id)}
                   unread={getUnreadCount(contact.id)}
-                  onClick={() => handleSelectContact(contact.id)}
+                  onClick={getContactSelectHandler(contact.id)}
                 />
               ))
             )}

@@ -3,6 +3,7 @@ import {
   Menu, MenuItem, ListItemIcon, ListItemText,
 } from '@mui/material'
 import { Delete, DeleteOutline, Download, Edit } from '@mui/icons-material'
+import { useMessageActionsMenuLogic } from '../handler/componentLogic'
 
 function MessageActionsMenu({
   anchorEl,
@@ -16,6 +17,13 @@ function MessageActionsMenu({
   downloadLabel = 'Download',
   onDownload,
 }) {
+  const {
+    handleEdit,
+    handleDownload,
+    handleDeleteForMe,
+    handleDeleteForEveryone,
+  } = useMessageActionsMenuLogic({ message, onClose, onDelete, onEdit, onDownload })
+
   return (
     <Menu
       anchorEl={anchorEl}
@@ -29,7 +37,7 @@ function MessageActionsMenu({
     >
       {canEdit && (
         <MenuItem
-          onClick={() => { onClose(); onEdit?.() }}
+          onClick={handleEdit}
           sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#f0f5f4' } }}
         >
           <ListItemIcon sx={{ minWidth: 'auto' }}><Edit sx={{ fontSize: 17, color: '#3C4F4A' }} /></ListItemIcon>
@@ -38,7 +46,7 @@ function MessageActionsMenu({
       )}
       {canDownload && (
         <MenuItem
-          onClick={(event) => { onClose(); onDownload?.(event) }}
+          onClick={handleDownload}
           sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#f0f5f4' } }}
         >
           <ListItemIcon sx={{ minWidth: 'auto' }}><Download sx={{ fontSize: 17, color: '#3C4F4A' }} /></ListItemIcon>
@@ -46,7 +54,7 @@ function MessageActionsMenu({
         </MenuItem>
       )}
       <MenuItem
-        onClick={() => { onDelete?.(message.id, 'me'); onClose() }}
+        onClick={handleDeleteForMe}
         sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#f5f5f5' } }}
       >
         <ListItemIcon sx={{ minWidth: 'auto' }}><DeleteOutline sx={{ fontSize: 17, color: '#757575' }} /></ListItemIcon>
@@ -54,7 +62,7 @@ function MessageActionsMenu({
       </MenuItem>
       {(message.mine || isAdmin) && (
         <MenuItem
-          onClick={() => { onDelete?.(message.id, 'everyone'); onClose() }}
+          onClick={handleDeleteForEveryone}
           sx={{ gap: 1, py: 1, px: 1.75, borderRadius: '8px', mx: 0.5, '&:hover': { bgcolor: '#feebee' } }}
         >
           <ListItemIcon sx={{ minWidth: 'auto' }}><Delete sx={{ fontSize: 17, color: '#c62828' }} /></ListItemIcon>

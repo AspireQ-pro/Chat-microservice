@@ -1,5 +1,3 @@
-import React, { useRef, useState, useCallback, useEffect } from "react";
-import { useSelector } from "react-redux";
 import {
   Alert,
   Avatar,
@@ -35,40 +33,15 @@ import {
 import MessageBubble from "./MessageBubble";
 import MediaAlbumBubble from "./MediaAlbumBubble";
 import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
-
-/* ── Date separator label ───────────────────────────────────────────────── */
-function dateSeparatorLabel(dateStr) {
-  // dateStr is a YYYY-MM-DD string in local time
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
-
-  if (dateStr === todayStr) return "Today";
-  if (dateStr === yesterdayStr) return "Yesterday";
-
-  // e.g. "Monday, 12 November 2026"
-  const [y, mo, d] = dateStr.split("-").map(Number);
-  return new Date(y, mo - 1, d).toLocaleDateString(undefined, {
-    weekday: "long", day: "numeric", month: "long", year: "numeric",
-  });
-}
-
-function localDateKey(isoString) {
-  if (!isoString) return null;
-  const d = new Date(isoString);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+import {
+  buildChatMessageGroups,
+  useChatWindowLogic,
+  useQueuedImageThumbLogic,
+} from "../handler/componentLogic";
 
 /* ── Thumbnail for image files queued for upload ───────────────────────── */
 function QueuedImageThumb({ file }) {
-  const [src, setSrc] = useState(null);
-  useEffect(() => {
-    const url = URL.createObjectURL(file);
-    setSrc(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+  const src = useQueuedImageThumbLogic(file);
   if (!src) return <InsertDriveFile sx={{ fontSize: 20, color: "#5c7a74", flexShrink: 0 }} />;
   return (
     <Box
@@ -110,142 +83,68 @@ function ChatWindow({
   onUnblockUser,
   socketConnected,
 }) {
-  const fileInputRef = useRef(null);
-  const user = useSelector((s) => s.auth.user);
-  const allowGroupChat = Boolean(user?.allowGroupChat);
-  const allowDirectChat = Boolean(user?.allowDirectChat);
-  const isAdmin = Boolean(user?.role) && user.role.toLowerCase().includes("admin");
-
-  // ── File queue tray ──
-  // Files are staged here; the user can keep adding more before sending.
-  const [queuedFiles, setQueuedFiles] = useState([]);
-  const addToQueue = useCallback((fileList) => {
-    const incoming = Array.from(fileList);
-    setQueuedFiles((prev) => {
-      // Avoid exact duplicates (same name + size) already in the queue
-      const existing = new Set(prev.map((f) => `${f.name}:${f.size}`));
-      const fresh = incoming.filter((f) => !existing.has(`${f.name}:${f.size}`));
-      return [...prev, ...fresh];
-    });
-  }, []);
-  const removeFromQueue = useCallback((idx) => {
-    setQueuedFiles((prev) => prev.filter((_, i) => i !== idx));
-  }, []);
-  const clearQueue = useCallback(() => setQueuedFiles([]), []);
-
-  // Reset queue whenever the active room changes
-  useEffect(() => { setQueuedFiles([]); }, [activeRoom?.id]);
-
-  // ── Three-dot menu ──
-  const [menuAnchor, setMenuAnchor] = useState(null);
-  const openMenu = (e) => setMenuAnchor(e.currentTarget);
-  const closeMenu = () => setMenuAnchor(null);
-
-  // ── Block / unblock confirmation dialogs ──
-  const [blockDialogOpen, setBlockDialogOpen] = useState(false);
-  const [unblockDialogOpen, setUnblockDialogOpen] = useState(false);
-  const [blockActionLoading, setBlockActionLoading] = useState(false);
-  const [blockActionError, setBlockActionError] = useState("");
-
-  const handleOpenBlockDialog = () => {
-    closeMenu();
-    setBlockActionError("");
-    setBlockDialogOpen(true);
-  };
-  const handleOpenUnblockDialog = () => {
-    closeMenu();
-    setBlockActionError("");
-    setUnblockDialogOpen(true);
-  };
-
-  const handleConfirmBlock = useCallback(async () => {
-    setBlockActionLoading(true);
-    setBlockActionError("");
-    try {
-      await onBlockUser(activeContact.id);
-      setBlockDialogOpen(false);
-    } catch (err) {
-      setBlockActionError(typeof err === "string" ? err : err?.message || "Failed to block user");
-    } finally {
-      setBlockActionLoading(false);
-    }
-  }, [onBlockUser, activeContact]);
-
-  const handleConfirmUnblock = useCallback(async () => {
-    setBlockActionLoading(true);
-    setBlockActionError("");
-    try {
-      await onUnblockUser(activeContact.id);
-      setUnblockDialogOpen(false);
-    } catch (err) {
-      setBlockActionError(typeof err === "string" ? err : err?.message || "Failed to unblock user");
-    } finally {
-      setBlockActionLoading(false);
-    }
-  }, [onUnblockUser, activeContact]);
-
-  // ── Drag-and-drop ──
-  const [isDragOver, setIsDragOver] = useState(false);
-
-  // Derived: chat feature enabled?
-  const chatFeatureDisabled = activeContact?.isGroup ? !allowGroupChat : !allowDirectChat;
-
-  // Admin-only group check — allow both the original creator and any promoted group admin
-  const myGroupMembership = activeRoom?.members?.find((m) => m.userId === currentUserId);
-  const isGroupAdmin = myGroupMembership?.role === "admin" || activeRoom?.createdById === currentUserId;
-  const canSendInAdminOnlyGroup = isAdmin || isGroupAdmin;
-  const adminOnlyBlocked = Boolean(
-    activeContact?.isGroup &&
-    activeRoom?.adminOnlyMessages &&
-    !canSendInAdminOnlyGroup,
-  );
-
-  // Block status (direct rooms only)
-  const blockedByMe   = !activeContact?.isGroup && Boolean(activeRoom?.blockedByMe);
-  const blockedByThem = !activeContact?.isGroup && Boolean(activeRoom?.blockedByThem);
-  const isBlocked     = blockedByMe || blockedByThem;
-
-  // Consolidated disabled flags
-  const attachDisabled =
-    !activeRoom?.id ||
-    uploadingFile ||
-    adminOnlyBlocked ||
-    isBlocked ||
-    chatFeatureDisabled ||
-    socketConnected === false;
-
-  const inputDisabled =
-    sendingFirstMessage ||
-    uploadingFile ||
-    adminOnlyBlocked ||
-    isBlocked ||
-    chatFeatureDisabled;
-
-  const sendDisabled = (!input.trim() && queuedFiles.length === 0) || inputDisabled;
-  const sendQueueDisabled = uploadingFile || queuedFiles.length === 0 || adminOnlyBlocked || isBlocked || chatFeatureDisabled || socketConnected === false;
-
-  // Drag-and-drop handlers
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (attachDisabled) return;
-    setIsDragOver(true);
-  }, [attachDisabled]);
-
-  const handleDragLeave = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false);
-  }, []);
-
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    if (attachDisabled) return;
-    const files = e.dataTransfer.files;
-    if (files?.length) addToQueue(files);
-  }, [attachDisabled, addToQueue]);
+  const {
+    fileInputRef,
+    allowGroupChat,
+    allowDirectChat,
+    isAdmin,
+    queuedFiles,
+    queuedFileRows,
+    clearQueue,
+    getRemoveFromQueueHandler,
+    menuAnchor,
+    openMenu,
+    closeMenu,
+    blockDialogOpen,
+    unblockDialogOpen,
+    blockActionLoading,
+    blockActionError,
+    handleOpenBlockDialog,
+    handleOpenUnblockDialog,
+    handleConfirmBlock,
+    handleConfirmUnblock,
+    handleCloseBlockDialog,
+    handleCloseUnblockDialog,
+    handleBlockDialogClose,
+    handleUnblockDialogClose,
+    isDragOver,
+    adminOnlyBlocked,
+    blockedByMe,
+    blockedByThem,
+    attachDisabled,
+    inputDisabled,
+    sendDisabled,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    openContactPanel,
+    handleFileInputChange,
+    openFilePicker,
+    handleInputChange,
+    handleInputKeyDown,
+    handleSendAction,
+    isPendingRequest,
+    isRequestSender,
+    canSendFirstRequest,
+    emptyStateTitle,
+    emptyStateDescription,
+  } = useChatWindowLogic({
+    activeContact,
+    activeRoom,
+    currentUserId,
+    messages,
+    uploadingFile,
+    sendingFirstMessage,
+    input,
+    setInput,
+    handleSend,
+    handleKeyDown,
+    setShowPanel,
+    onUploadFile,
+    onBlockUser,
+    onUnblockUser,
+    socketConnected,
+  })
 
   // ── Empty state ──
   if (!activeContact) {
@@ -266,7 +165,7 @@ function ChatWindow({
           <Box sx={{ position: "absolute", top: 12, left: 12 }}>
             <IconButton
               size="small"
-              onClick={() => setShowPanel(true)}
+              onClick={openContactPanel}
               sx={{ p: 1, minWidth: 40, minHeight: 40 }}
             >
               <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
@@ -277,31 +176,14 @@ function ChatWindow({
           <Send sx={{ color: "#3C4F4A", fontSize: 28 }} />
         </Avatar>
         <Typography variant="h6" fontWeight={600}>
-          {!allowGroupChat && !allowDirectChat
-            ? "Chat Disabled"
-            : allowGroupChat && !allowDirectChat
-              ? "Group Chat"
-              : !allowGroupChat && allowDirectChat
-                ? "Individual Chat"
-                : "Chat"}
+          {emptyStateTitle}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {!allowGroupChat && !allowDirectChat
-            ? "Neither group chat nor individual chat is enabled for this project"
-            : allowGroupChat && !allowDirectChat
-              ? "Select a group to start messaging"
-              : !allowGroupChat && allowDirectChat
-                ? "Select a contact to start messaging"
-                : "Select a contact or group to start messaging"}
+          {emptyStateDescription}
         </Typography>
       </Box>
     );
   }
-
-  const isPendingRequest = activeRoom?.directStatus === "pending";
-  const isRequestSender  = activeRoom?.requestedById === currentUserId;
-  const requestAlreadySent = messages.length > 0 || Boolean(activeRoom?.lastMessageAt);
-  const canSendFirstRequest = isPendingRequest && isRequestSender && !requestAlreadySent;
 
   return (
     <Box
@@ -361,7 +243,7 @@ function ChatWindow({
         {isMobile && (
           <IconButton
             size="small"
-            onClick={() => setShowPanel(true)}
+            onClick={openContactPanel}
             sx={{ p: 1, minWidth: 40, minHeight: 40, mr: 0.5 }}
           >
             <img src={arrowIcon} alt="back" style={{ width: 8, height: 14 }} />
@@ -529,81 +411,54 @@ function ChatWindow({
             </Typography>
           </Box>
         ) : (
-          (() => {
-            const items = [];
-            let lastDateKey = null;
-            messages.forEach((message) => {
-              const dateKey = localDateKey(message.createdAt);
-              if (dateKey && dateKey !== lastDateKey) {
-                lastDateKey = dateKey;
-                items.push(
-                  <Box
-                    key={`sep-${dateKey}`}
-                    sx={{ display: "flex", alignItems: "center", justifyContent: "center", my: 1.5, px: 2 }}
-                  >
-                    <Chip
-                      label={dateSeparatorLabel(dateKey)}
-                      size="small"
-                      sx={{
-                        bgcolor: "rgba(0,0,0,0.08)",
-                        color: "text.secondary",
-                        fontSize: "0.7rem",
-                        fontWeight: 600,
-                        height: 22,
-                        px: 0.5,
-                        borderRadius: "11px",
-                        userSelect: "none",
-                        "& .MuiChip-label": { px: 1.25 },
-                      }}
-                    />
-                  </Box>
-                );
-              }
-              // Group messages that share a groupId into a single media album bubble.
-              if (message.groupId) {
-                const prevItem = items[items.length - 1];
-                if (
-                  prevItem &&
-                  prevItem.type === MediaAlbumBubble &&
-                  prevItem.props.groupId === message.groupId
-                ) {
-                  items[items.length - 1] = (
-                    <MediaAlbumBubble
-                      key={message.groupId}
-                      groupId={message.groupId}
-                      messages={[...prevItem.props.messages, message]}
-                      onRetry={onRetryMessage}
-                      onDelete={onDeleteMessage}
-                      isAdmin={isAdmin}
-                    />
-                  );
-                } else {
-                  items.push(
-                    <MediaAlbumBubble
-                      key={message.groupId}
-                      groupId={message.groupId}
-                      messages={[message]}
-                      onRetry={onRetryMessage}
-                      onDelete={onDeleteMessage}
-                      isAdmin={isAdmin}
-                    />
-                  );
-                }
-              } else {
-                items.push(
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    onRetry={onRetryMessage}
-                    onEdit={onEditMessage}
-                    onDelete={onDeleteMessage}
-                    isAdmin={isAdmin}
+          buildChatMessageGroups(messages).map((group) => {
+            if (group.type === "date") {
+              return (
+                <Box
+                  key={`sep-${group.dateKey}`}
+                  sx={{ display: "flex", alignItems: "center", justifyContent: "center", my: 1.5, px: 2 }}
+                >
+                  <Chip
+                    label={group.label}
+                    size="small"
+                    sx={{
+                      bgcolor: "rgba(0,0,0,0.08)",
+                      color: "text.secondary",
+                      fontSize: "0.7rem",
+                      fontWeight: 600,
+                      height: 22,
+                      px: 0.5,
+                      borderRadius: "11px",
+                      userSelect: "none",
+                      "& .MuiChip-label": { px: 1.25 },
+                    }}
                   />
-                );
-              }
-            });
-            return items;
-          })()
+                </Box>
+              );
+            }
+            if (group.type === "album") {
+              return (
+                <MediaAlbumBubble
+                  key={group.groupId}
+                  groupId={group.groupId}
+                  messages={group.messages}
+                  onRetry={onRetryMessage}
+                  onDelete={onDeleteMessage}
+                  isAdmin={isAdmin}
+                />
+              );
+            }
+            return (
+              <MessageBubble
+                key={group.message.id}
+                message={group.message}
+                onRetry={onRetryMessage}
+                onEdit={onEditMessage}
+                onDelete={onDeleteMessage}
+                isAdmin={isAdmin}
+              />
+            );
+          })
         )}
         <div ref={messagesEndRef} />
       </Box>
@@ -753,11 +608,10 @@ function ChatWindow({
                 border: "1px solid #dde8e5",
               }}
             >
-              {queuedFiles.map((file, idx) => {
-                const isImage = file.type.startsWith("image/");
+              {queuedFileRows.map(({ file, index, isImage }) => {
                 return (
                   <Box
-                    key={idx}
+                    key={index}
                     sx={{
                       position: "relative",
                       display: "flex",
@@ -791,7 +645,7 @@ function ChatWindow({
                     </Typography>
                     <IconButton
                       size="small"
-                      onClick={() => removeFromQueue(idx)}
+                      onClick={getRemoveFromQueueHandler(index)}
                       sx={{ p: 0.25, ml: 0.25, color: "#9e9e9e", "&:hover": { color: "#c62828" } }}
                     >
                       <Close sx={{ fontSize: 14 }} />
@@ -817,11 +671,7 @@ function ChatWindow({
               type="file"
               multiple
               hidden
-              onChange={(event) => {
-                const files = event.target.files;
-                if (files?.length) addToQueue(files);
-                event.target.value = "";
-              }}
+              onChange={handleFileInputChange}
             />
             <Tooltip
               title={
@@ -835,7 +685,7 @@ function ChatWindow({
               <span>
                 <IconButton
                   aria-label="Attach file"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={openFilePicker}
                   disabled={attachDisabled}
                   sx={{
                     p: 1,
@@ -863,28 +713,13 @@ function ChatWindow({
                   : `Message ${activeContact.name}...`
               }
               value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && queuedFiles.length > 0 && !input.trim()) {
-                  e.preventDefault();
-                  onUploadFile?.(queuedFiles);
-                  clearQueue();
-                  return;
-                }
-                handleKeyDown(e);
-              }}
+              onChange={handleInputChange}
+              onKeyDown={handleInputKeyDown}
               disabled={inputDisabled}
               sx={{ "& .MuiOutlinedInput-root": { borderRadius: "12px", bgcolor: "#f8fafc" } }}
             />
             <IconButton
-              onClick={() => {
-                if (queuedFiles.length > 0) {
-                  onUploadFile?.(queuedFiles);
-                  clearQueue();
-                } else {
-                  handleSend();
-                }
-              }}
+              onClick={handleSendAction}
               disabled={sendDisabled}
               sx={{
                 bgcolor: !sendDisabled ? "#3C4F4A" : "#e0e0e0",
@@ -906,7 +741,7 @@ function ChatWindow({
       {/* ── Block confirmation dialog ── */}
       <Dialog
         open={blockDialogOpen}
-        onClose={() => !blockActionLoading && setBlockDialogOpen(false)}
+        onClose={handleBlockDialogClose}
         maxWidth="xs"
         fullWidth
         PaperProps={{ sx: { borderRadius: 3 } }}
@@ -927,7 +762,7 @@ function ChatWindow({
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button
-            onClick={() => setBlockDialogOpen(false)}
+            onClick={handleCloseBlockDialog}
             disabled={blockActionLoading}
             sx={{ textTransform: "none", color: "text.secondary" }}
           >
@@ -958,7 +793,7 @@ function ChatWindow({
       {/* ── Unblock confirmation dialog ── */}
       <Dialog
         open={unblockDialogOpen}
-        onClose={() => !blockActionLoading && setUnblockDialogOpen(false)}
+        onClose={handleUnblockDialogClose}
         maxWidth="xs"
         fullWidth
         PaperProps={{ sx: { borderRadius: 3 } }}
@@ -979,7 +814,7 @@ function ChatWindow({
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
           <Button
-            onClick={() => setUnblockDialogOpen(false)}
+            onClick={handleCloseUnblockDialog}
             disabled={blockActionLoading}
             sx={{ textTransform: "none", color: "text.secondary" }}
           >

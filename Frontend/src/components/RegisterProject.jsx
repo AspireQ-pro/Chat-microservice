@@ -1,57 +1,25 @@
-import React, { useState } from 'react'
 import { Box, Typography, TextField, Button, Paper, Alert, Snackbar, FormControlLabel, Checkbox } from '@mui/material'
 import ContentCopy from '@mui/icons-material/ContentCopy'
-
-const API =
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV ? 'http://localhost:5000' : '')
+import { useRegisterProjectLogic } from '../handler/componentLogic'
 
 function RegisterProject() {
-  const [name, setName] = useState('')
-  const [registrationSecret, setRegistrationSecret] = useState('')
-  const [allowGroupChat, setAllowGroupChat] = useState(true)
-  const [allowDirectChat, setAllowDirectChat] = useState(true)
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (!name.trim() || !registrationSecret.trim()) return
-    setLoading(true)
-    setResult(null)
-    setError('')
-
-    try {
-      const res = await fetch(`${API}/api/projects`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-REGISTRATION-SECRET': registrationSecret,
-        },
-        body: JSON.stringify({
-          name: name.trim(),
-          allowGroupChat,
-          allowDirectChat,
-        }),
-      })
-      const data = await res.json()
-      if (res.ok) setResult(data)
-      else setError(data.error || 'Failed to register')
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const copyApiKey = () => {
-    if (result?.apiKey) {
-      navigator.clipboard.writeText(result.apiKey)
-      setCopied(true)
-    }
-  }
+  const {
+    name,
+    registrationSecret,
+    allowGroupChat,
+    allowDirectChat,
+    loading,
+    result,
+    error,
+    copied,
+    handleSubmit,
+    handleNameChange,
+    handleSecretChange,
+    handleGroupChatChange,
+    handleDirectChatChange,
+    handleCopyApiKey,
+    handleCloseCopied,
+  } = useRegisterProjectLogic()
 
   if (import.meta.env.PROD) {
     return (
@@ -76,7 +44,7 @@ function RegisterProject() {
             fullWidth
             label="Project Name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={handleNameChange}
             placeholder="e.g., Society Management"
             required
             sx={{ mb: 2 }}
@@ -86,7 +54,7 @@ function RegisterProject() {
             type="password"
             label="Registration Secret"
             value={registrationSecret}
-            onChange={(e) => setRegistrationSecret(e.target.value)}
+            onChange={handleSecretChange}
             autoComplete="off"
             required
             sx={{ mb: 2 }}
@@ -100,7 +68,7 @@ function RegisterProject() {
                 <Checkbox
                   size="small"
                   checked={allowGroupChat}
-                  onChange={(e) => setAllowGroupChat(e.target.checked)}
+                  onChange={handleGroupChatChange}
                 />
               }
               label={<Typography variant="body2">Group Chat</Typography>}
@@ -110,7 +78,7 @@ function RegisterProject() {
                 <Checkbox
                   size="small"
                   checked={allowDirectChat}
-                  onChange={(e) => setAllowDirectChat(e.target.checked)}
+                  onChange={handleDirectChatChange}
                 />
               }
               label={<Typography variant="body2">Individual Chat (Direct Messaging)</Typography>}
@@ -148,7 +116,7 @@ function RegisterProject() {
               <Typography variant="caption" sx={{ bgcolor: '#f5f5f5', px: 1, py: 0.5, borderRadius: 1, fontFamily: 'monospace', fontSize: '0.75rem', wordBreak: 'break-all' }}>
                 {result.apiKey}
               </Typography>
-              <Button size="small" variant="outlined" onClick={copyApiKey} sx={{ minWidth: 40, p: 0.5 }}>
+              <Button size="small" variant="outlined" onClick={handleCopyApiKey} sx={{ minWidth: 40, p: 0.5 }}>
                 <ContentCopy fontSize="small" />
               </Button>
             </Box>
@@ -162,7 +130,7 @@ function RegisterProject() {
       <Snackbar
         open={copied}
         autoHideDuration={2000}
-        onClose={() => setCopied(false)}
+        onClose={handleCloseCopied}
         message="API Key copied!"
       />
     </Box>

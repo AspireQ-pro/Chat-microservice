@@ -1,5 +1,3 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { useSelector } from 'react-redux'
 import {
   Box, Typography, IconButton, Tooltip, CircularProgress,
 } from '@mui/material'
@@ -8,9 +6,11 @@ import {
   InsertDriveFile, PictureAsPdf, TableChart, Slideshow,
   Description, AudioFile, VideoFile, Archive, TextSnippet,
 } from '@mui/icons-material'
-import { API_BASE } from '../features/media/upload'
-import { downloadFile } from '../utils/fileOpener'
 import MessageActionsMenu from './MessageActionsMenu'
+import {
+  useMediaAlbumBubbleLogic,
+  useMediaAlbumTileLogic,
+} from '../handler/componentLogic'
 
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
 function Ticks({ status }) {
@@ -54,132 +54,24 @@ function FileIcon({ fileName, fileType }) {
 
 /* ─── Single tile inside the album grid ──────────────────────────────────── */
 function AlbumTile({ message, totalCount, index, onDelete, isAdmin }) {
-  const token  = useSelector((s) => s.auth.token)
-  const isMine = message.mine
-
-  const [blobUrl,     setBlobUrl]     = useState(null)
-  const [loading,     setLoading]     = useState(false)
-  const [downloading, setDownloading] = useState(false)
-  const [menuAnchor, setMenuAnchor] = useState(null)
-  const longPressTimer = useRef(null)
-
-  const isImage = message.fileType === 'image'
-  const isVideo = message.fileType === 'video'
-  const isAudio = message.fileType === 'audio'
-  const isFile  = !isImage && !isVideo && !isAudio
-
-  /* ── Canonical proxy URL ── */
-  const resolveUrl = useCallback(() => {
-    if (!message.fileUrl) return null
-    try {
-      const parsed       = new URL(message.fileUrl, window.location.href)
-      const backendOrigin = new URL(API_BASE, window.location.href).origin
-      if (parsed.origin === backendOrigin && parsed.pathname.includes('/uploads/')) {
-        return message.fileUrl
-      }
-      if (!message.roomId) return message.fileUrl
-      const filename = parsed.pathname.split('/').pop()
-      return filename ? `${API_BASE}/rooms/${message.roomId}/uploads/${filename}` : message.fileUrl
-    } catch { return message.fileUrl }
-  }, [message.fileUrl, message.roomId])
-
-  /* ── Auth-fetch blob for images and videos ── */
-  useEffect(() => {
-    if (!isImage && !isVideo) return
-    if (!message.fileUrl || !token) return
-    const controller  = new AbortController()
-    setLoading(true)
-    let objectUrl = null
-
-    const makeHeaders = (url) => {
-      try {
-        const backendOrigin = new URL(API_BASE, window.location.href).origin
-        if (new URL(url, window.location.href).origin === backendOrigin) {
-          return { Authorization: `Bearer ${token}` }
-        }
-      } catch { /* ignore */ }
-      return {}
-    }
-
-    const fetchUrl = (url) =>
-      fetch(url, { headers: makeHeaders(url), signal: controller.signal })
-
-    fetchUrl(message.fileUrl)
-      .then((r) => {
-        if (r.ok) return r
-        const proxy = resolveUrl()
-        if (proxy && proxy !== message.fileUrl) return fetchUrl(proxy)
-        throw new Error(`HTTP ${r.status}`)
-      })
-      .then((r) => r.blob())
-      .then((blob) => {
-        if (controller.signal.aborted) return
-        objectUrl = URL.createObjectURL(blob)
-        setBlobUrl(objectUrl)
-        setLoading(false)
-      })
-      .catch((e) => { if (e.name !== 'AbortError') setLoading(false) })
-
-    return () => {
-      controller.abort()
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [isImage, isVideo, message.fileUrl, token, resolveUrl])
-
-  /* ── Download handler ── */
-  const handleDownload = useCallback(async (e) => {
-    e?.stopPropagation()
-    if (downloading) return
-    const url = resolveUrl()
-    if (!url) return
-    setDownloading(true)
-    try { await downloadFile(url, message.fileName || url.split('/').pop() || 'download', token) }
-    catch { /* ignore */ }
-    finally { setDownloading(false) }
-  }, [downloading, resolveUrl, message.fileName, token])
-
-  const openMenu = useCallback((e) => {
-    e.preventDefault()
-    if (message.isDeleted || message.id?.startsWith('optimistic-')) return
-    setMenuAnchor(e.currentTarget)
-  }, [message.isDeleted, message.id])
-
-  const onTouchStart = useCallback((e) => {
-    if (message.isDeleted || message.id?.startsWith('optimistic-')) return
-    const target = e.currentTarget
-    longPressTimer.current = setTimeout(() => setMenuAnchor(target), 500)
-  }, [message.isDeleted, message.id])
-
-  const onTouchEnd = useCallback(() => {
-    clearTimeout(longPressTimer.current)
-  }, [])
-
-  const closeMenu = () => setMenuAnchor(null)
-
-  useEffect(() => () => clearTimeout(longPressTimer.current), [])
-
-  /* ── Grid sizing ──────────────────────────────────────────────────────────
-     1 file  → full width, tall
-     2 files → side by side, equal halves
-     3 files → first item full-width, next two side by side below
-     4+      → 2-column grid, equal tiles
-  ── */
-  const isFullRow  = totalCount === 1 || (totalCount === 3 && index === 0)
-  const tileWidth  = isFullRow ? '100%' : 'calc(50% - 1px)'
-  const tileHeight = isFullRow
-    ? (totalCount === 1 ? 240 : 170)
-    : (totalCount === 2 ? 200 : 150)
-
-  const sharedSx = {
-    position: 'relative',
-    width: tileWidth,
-    flexShrink: 0,
-    height: tileHeight,
-    overflow: 'hidden',
-    bgcolor: '#111',
-    '&:hover .dl-btn': { opacity: 1 },
-    cursor: message.isDeleted || message.id?.startsWith('optimistic-') ? 'default' : 'context-menu',
-  }
+  const {
+    isMine,
+    isImage,
+    isVideo,
+    isAudio,
+    isFile,
+    blobUrl,
+    loading,
+    downloading,
+    menuAnchor,
+    handleDownload,
+    openMenu,
+    onTouchStart,
+    onTouchEnd,
+    closeMenu,
+    sharedSx,
+    handleOpenImage,
+  } = useMediaAlbumTileLogic({ message, totalCount, index })
 
   return (
     <Box
@@ -211,7 +103,7 @@ function AlbumTile({ message, totalCount, index, onDelete, isAdmin }) {
               src={blobUrl}
               alt={message.fileName || 'image'}
               loading="lazy"
-              onClick={() => window.open(blobUrl, '_blank', 'noopener,noreferrer')}
+              onClick={handleOpenImage}
               sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', cursor: 'zoom-in' }}
             />
             <Tooltip title="Download">
@@ -320,15 +212,8 @@ function AlbumTile({ message, totalCount, index, onDelete, isAdmin }) {
 
 /* ─── MediaAlbumBubble ────────────────────────────────────────────────────── */
 function MediaAlbumBubble({ groupId, messages, onRetry, onDelete, isAdmin }) {
-  if (!messages?.length) return null
-
-  const first  = messages[0]
-  const isMine = first.mine
-  const count  = messages.length
-
-  // The last message in the group carries the definitive status and time
-  const last   = messages[messages.length - 1]
-  const failed = isMine && messages.some((m) => m.status === 'failed')
+  const { first, isMine, count, last, failed } = useMediaAlbumBubbleLogic(messages)
+  if (!first) return null
 
   return (
     <Box

@@ -2,23 +2,17 @@ import React from "react";
 import { Box, Typography, Badge } from "@mui/material";
 import { Circle } from "@mui/icons-material";
 import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
-
-function formatTime(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  if (isNaN(d)) return "";
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
+import { useContactItemLogic } from "../handler/componentLogic";
 
 function ContactItem({ contact, active, lastMessage, unread, onClick }) {
-  const timeLabel = formatTime(contact.lastMessageAt || contact.lastSeenAt);
+  const { timeLabel, handleKeyDown } = useContactItemLogic(contact, onClick);
 
   return (
     <Box
       onClick={onClick}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.() }}
+      onKeyDown={handleKeyDown}
       sx={{
         display: "flex",
         flexDirection: "row",

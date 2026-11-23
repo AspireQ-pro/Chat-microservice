@@ -1,28 +1,18 @@
-import React, { useState } from 'react'
 import {
   Box, Typography, Avatar, Divider, Button, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions,
   CircularProgress,
 } from '@mui/material'
 import { ExitToApp, People } from '@mui/icons-material'
+import { useGroupMembersDialogLogic } from '../handler/componentLogic'
 
 function GroupMembersDialog({ open, onClose, room, currentUserId, onLeave }) {
-  const members = room?.members || []
-  const [leaving, setLeaving] = useState(false)
-  const [leaveError, setLeaveError] = useState('')
-
-  async function handleLeave() {
-    setLeaveError('')
-    setLeaving(true)
-    try {
-      await onLeave(room.id)
-      onClose()
-    } catch (err) {
-      setLeaveError(err.message || 'Failed to leave group')
-    } finally {
-      setLeaving(false)
-    }
-  }
+  const { members, leaving, leaveError, handleLeave } = useGroupMembersDialogLogic({
+    room,
+    currentUserId,
+    onClose,
+    onLeave,
+  });
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs" PaperProps={{ sx: { borderRadius: 3 } }}>
@@ -42,11 +32,8 @@ function GroupMembersDialog({ open, onClose, room, currentUserId, onLeave }) {
           </Typography>
         )}
         <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
-          {members.map((m, idx) => {
-            const user      = m.user || {}
-            const isMe      = m.userId === currentUserId
-            const isAdmin   = m.role === 'admin'
-            const avatar    = user.name?.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2) || '?'
+          {members.map((m) => {
+            const { index: idx, user, isMe, isAdmin, avatar } = m
             return (
               <Box key={m.userId || idx}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1.25 }}>
