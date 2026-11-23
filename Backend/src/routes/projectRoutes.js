@@ -158,6 +158,7 @@ const handleSyncUser = asyncHandler(async (req, res) => {
         name: String(name),
         email: safeEmail,
         role: safeRole,
+        deletedAt: null,
         // When Society Management provides an avatarUrl, it is the source of truth —
         // clear any previously chat-uploaded avatar (avatarStorageKey).
         ...(safeAvatarUrl !== undefined ? { avatarUrl: safeAvatarUrl, avatarStorageKey: null } : {}),
@@ -299,7 +300,7 @@ app.post(
               externalUserId: String(id),
             },
           },
-          update: { name: String(name), email: safeEmail, role: safeRole },
+          update: { name: String(name), email: safeEmail, role: safeRole, deletedAt: null },
           create: {
             projectId: req.project.id,
             externalUserId: String(id),
@@ -322,6 +323,41 @@ app.post(
 // 3. SEARCH USERS â€” Only within the same project
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+// ─── 2c. DELETE USER (server-to-server) ───────────────────────────────────────
+// DELETE /api/users/:externalUserId
+// Society Management calls this when a user is removed there, so the user is
+// reflected as deleted in chat (hidden from the user list, blocked from being
+// added to rooms, rejected on a stale token). Auth: X-API-KEY (resolveProject).
+// Idempotent — deleting an unknown or already-deleted user is a no-op. This is
+// a soft delete: the ChatUser row and its message history are retained so old
+// conversations stay readable; re-syncing the same externalUserId reactivates it.
+app.delete(
+  `${API_BASE}/users/:externalUserId`,
+  resolveProject,
+  asyncHandler(async (req, res) => {
+    const externalUserId = String(req.params.externalUserId);
+    const chatUser = await prisma.chatUser.findUnique({
+      where: {
+        projectId_externalUserId: {
+          projectId: req.project.id,
+          externalUserId,
+        },
+      },
+      select: { id: true, deletedAt: true },
+    });
+    if (!chatUser) {
+      return res.json({ success: true, deleted: false, externalUserId });
+    }
+    if (!chatUser.deletedAt) {
+      await prisma.chatUser.update({
+        where: { id: chatUser.id },
+        data: { deletedAt: new Date() },
+      });
+    }
+    res.json({ success: true, deleted: true, externalUserId, chatUserId: chatUser.id });
+  }),
+);
+
 app.get(`${API_BASE}/users/me`, authenticateChatJWT, async (req, res) => {
   try {
     const user = await prisma.chatUser.findUnique({
@@ -329,6 +365,9 @@ app.get(`${API_BASE}/users/me`, authenticateChatJWT, async (req, res) => {
     });
     if (!user || user.projectId !== req.projectId) {
       return res.status(404).json({ error: "Not found" });
+    }
+    if (user.deletedAt) {
+      return res.status(403).json({ error: "This account has been removed" });
     }
     const { avatarStorageKey, ...publicUser } = user;
     publicUser.avatarUrl = avatarStorageKey
@@ -347,7 +386,7 @@ app.get(`${API_BASE}/users`, authenticateChatJWT, async (req, res) => {
     if (!allowDirectChat && !allowGroupChat) {
       return res.json([]);
     }
-    const where = { projectId: req.projectId };
+    const where = { projectId: req.projectId, deletedAt: null };
     if (excludeId) where.id = { not: excludeId };
     if (q) where.name = { contains: q, mode: "insensitive" };
 

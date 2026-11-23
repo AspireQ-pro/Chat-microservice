@@ -29,9 +29,9 @@ app.post(`${API_BASE}/rooms/direct`, authenticateChatJWT, async (req, res) => {
       .json({ error: "Cannot open a direct room with yourself" });
 
   try {
-    // Both users must belong to this project
+    // Both users must belong to this project and must not be soft-deleted
     const count = await prisma.chatUser.count({
-      where: { projectId: req.projectId, id: { in: [userId1, userId2] } },
+      where: { projectId: req.projectId, id: { in: [userId1, userId2] }, deletedAt: null },
     });
     if (count !== 2)
       return res
@@ -87,7 +87,7 @@ app.post(
 
     try {
       const validUsers = await prisma.chatUser.count({
-        where: { projectId: req.projectId, id: { in: [senderId, userId2] } },
+        where: { projectId: req.projectId, id: { in: [senderId, userId2] }, deletedAt: null },
       });
       if (validUsers !== 2) {
         return res.status(403).json({ error: "Users must belong to this project" });

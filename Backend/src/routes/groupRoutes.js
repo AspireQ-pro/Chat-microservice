@@ -62,7 +62,7 @@ app.post(`${API_BASE}/rooms/group`, authenticateChatJWT, async (req, res) => {
 
   const allIds = Array.from(new Set([creatorId, ...memberIds]));
   const validCount = await prisma.chatUser.count({
-    where: { projectId: req.projectId, id: { in: allIds } },
+    where: { projectId: req.projectId, id: { in: allIds }, deletedAt: null },
   });
   if (validCount !== allIds.length) {
     return res
@@ -275,7 +275,7 @@ app.post(`${API_BASE}/rooms/:roomId/members`, authenticateChatJWT, asyncHandler(
   if (!newIds.length) return sendError(res, 400, 'All users are already members');
 
   const validCount = await prisma.chatUser.count({
-    where: { projectId: req.projectId, id: { in: newIds } },
+    where: { projectId: req.projectId, id: { in: newIds }, deletedAt: null },
   });
   if (validCount !== newIds.length) {
     return sendError(res, 403, 'Some users do not belong to this project');
