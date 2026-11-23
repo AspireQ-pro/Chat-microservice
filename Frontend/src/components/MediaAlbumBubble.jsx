@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useSelector } from 'react-redux'
 import {
   Box, Typography, IconButton, Tooltip, CircularProgress,
@@ -10,6 +10,7 @@ import {
 } from '@mui/icons-material'
 import { API_BASE } from '../features/media/upload'
 import { downloadFile } from '../utils/fileOpener'
+import MessageActionsMenu from './MessageActionsMenu'
 
 /* ─── Tick indicators ─────────────────────────────────────────────────────── */
 function Ticks({ status }) {
@@ -52,13 +53,15 @@ function FileIcon({ fileName, fileType }) {
 }
 
 /* ─── Single tile inside the album grid ──────────────────────────────────── */
-function AlbumTile({ message, totalCount, index }) {
+function AlbumTile({ message, totalCount, index, onDelete, isAdmin }) {
   const token  = useSelector((s) => s.auth.token)
   const isMine = message.mine
 
   const [blobUrl,     setBlobUrl]     = useState(null)
   const [loading,     setLoading]     = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [menuAnchor, setMenuAnchor] = useState(null)
+  const longPressTimer = useRef(null)
 
   const isImage = message.fileType === 'image'
   const isVideo = message.fileType === 'video'
@@ -135,6 +138,26 @@ function AlbumTile({ message, totalCount, index }) {
     finally { setDownloading(false) }
   }, [downloading, resolveUrl, message.fileName, token])
 
+  const openMenu = useCallback((e) => {
+    e.preventDefault()
+    if (message.isDeleted || message.id?.startsWith('optimistic-')) return
+    setMenuAnchor(e.currentTarget)
+  }, [message.isDeleted, message.id])
+
+  const onTouchStart = useCallback((e) => {
+    if (message.isDeleted || message.id?.startsWith('optimistic-')) return
+    const target = e.currentTarget
+    longPressTimer.current = setTimeout(() => setMenuAnchor(target), 500)
+  }, [message.isDeleted, message.id])
+
+  const onTouchEnd = useCallback(() => {
+    clearTimeout(longPressTimer.current)
+  }, [])
+
+  const closeMenu = () => setMenuAnchor(null)
+
+  useEffect(() => () => clearTimeout(longPressTimer.current), [])
+
   /* ── Grid sizing ──────────────────────────────────────────────────────────
      1 file  → full width, tall
      2 files → side by side, equal halves
@@ -155,13 +178,28 @@ function AlbumTile({ message, totalCount, index }) {
     overflow: 'hidden',
     bgcolor: '#111',
     '&:hover .dl-btn': { opacity: 1 },
+    cursor: message.isDeleted || message.id?.startsWith('optimistic-') ? 'default' : 'context-menu',
   }
 
   return (
-    <Box sx={sharedSx}>
+    <Box
+      sx={sharedSx}
+      onContextMenu={openMenu}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+    >
+
+      {message.isDeleted ? (
+        <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', px: 1 }}>
+          <Typography variant="caption" sx={{ color: '#aaa', fontStyle: 'italic', textAlign: 'center' }}>
+            This message was deleted
+          </Typography>
+        </Box>
+      ) : null}
 
       {/* ── Image ── */}
-      {isImage && (
+      {!message.isDeleted && isImage && (
         loading ? (
           <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <CircularProgress size={22} sx={{ color: '#ccc' }} />
@@ -204,7 +242,7 @@ function AlbumTile({ message, totalCount, index }) {
       )}
 
       {/* ── Video ── */}
-      {isVideo && (
+      {!message.isDeleted && isVideo && (
         loading ? (
           <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <CircularProgress size={22} sx={{ color: '#ccc' }} />
@@ -224,7 +262,7 @@ function AlbumTile({ message, totalCount, index }) {
       )}
 
       {/* ── Audio tile ── */}
-      {isAudio && (
+      {!message.isDeleted && isAudio && (
         <Box sx={{
           width: '100%', height: '100%',
           display: 'flex', flexDirection: 'column',
@@ -247,7 +285,7 @@ function AlbumTile({ message, totalCount, index }) {
       )}
 
       {/* ── Generic file tile ── */}
-      {isFile && (
+      {!message.isDeleted && isFile && (
         <Box sx={{
           width: '100%', height: '100%',
           display: 'flex', flexDirection: 'column',
@@ -269,6 +307,13 @@ function AlbumTile({ message, totalCount, index }) {
         </Box>
       )}
 
+      <MessageActionsMenu
+        anchorEl={menuAnchor}
+        onClose={closeMenu}
+        message={message}
+        isAdmin={isAdmin}
+        onDelete={onDelete}
+      />
     </Box>
   )
 }
@@ -333,6 +378,8 @@ function MediaAlbumBubble({ groupId, messages, onRetry, onDelete, isAdmin }) {
               message={msg}
               totalCount={count}
               index={idx}
+              onDelete={onDelete}
+              isAdmin={isAdmin}
             />
           ))}
         </Box>
