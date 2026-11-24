@@ -14,6 +14,7 @@ import { useTheme, useMediaQuery } from '@mui/material'
 import { useDispatch } from 'react-redux'
 import AuthenticatedAvatar from '@/features/media/AuthenticatedAvatar'
 import {
+  fetchUsers,
   updateGroupInfo,
   addGroupMembers,
   removeGroupMember,
@@ -112,6 +113,7 @@ function GroupInfoDialog({
   // Reset local state when dialog opens
   useEffect(() => {
     if (open) {
+      dispatch(fetchUsers({}))
       setView('info')
       setSaveError('')
       setAddError('')
@@ -121,7 +123,7 @@ function GroupInfoDialog({
       setAddSearch('')
       setSavedAvatarPreview(null)
     }
-  }, [open])
+  }, [dispatch, open])
 
   // Pre-fill edit fields when entering edit view
   useEffect(() => {
