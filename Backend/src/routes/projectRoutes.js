@@ -315,7 +315,23 @@ app.post(
       }
     }
 
-    res.json({ success: true, synced, total: users.length, errors });
+    let deactivated = 0;
+    // bulk-sync is a complete snapshot of the project's society users. Only
+    // reconcile removals after every supplied user was synced successfully.
+    if (errors.length === 0) {
+      const activeExternalUserIds = [...new Set(users.map((u) => String(u.id)))];
+      const result = await prisma.chatUser.updateMany({
+        where: {
+          projectId: req.project.id,
+          deletedAt: null,
+          externalUserId: { notIn: activeExternalUserIds },
+        },
+        data: { deletedAt: new Date() },
+      });
+      deactivated = result.count;
+    }
+
+    res.json({ success: true, synced, total: users.length, deactivated, errors });
   }),
 );
 
