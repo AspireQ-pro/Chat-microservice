@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useEffect } from "react";
+import React, { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useSelector } from "react-redux";
 import {
   Alert,
@@ -34,6 +34,7 @@ import {
 } from "@mui/icons-material";
 import MessageBubble from "./MessageBubble";
 import MediaAlbumBubble from "./MediaAlbumBubble";
+import ImageLightbox from "./ImageLightbox";
 import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
 
 /* ── Date separator label ───────────────────────────────────────────────── */
@@ -115,6 +116,21 @@ function ChatWindow({
   const allowGroupChat = Boolean(user?.allowGroupChat);
   const allowDirectChat = Boolean(user?.allowDirectChat);
   const isAdmin = Boolean(user?.role) && user.role.toLowerCase().includes("admin");
+  const token = useSelector((s) => s.auth.token);
+
+  // ── Media lightbox — in-app carousel for images and videos (replaces
+  //    opening media in a browser tab) ──
+  const roomMedia = useMemo(
+    () => (messages || []).filter(
+      (m) => (m.fileType === "image" || m.fileType === "video") && m.fileUrl && !m.isDeleted,
+    ),
+    [messages],
+  );
+  const [lightboxStart, setLightboxStart] = useState(null); // null = closed, else starting index
+  const handleOpenMedia = useCallback((message) => {
+    const i = roomMedia.findIndex((m) => m.id === message.id);
+    if (i >= 0) setLightboxStart(i);
+  }, [roomMedia]);
 
   // ── File queue tray ──
   // Files are staged here; the user can keep adding more before sending.
@@ -574,6 +590,7 @@ function ChatWindow({
                       messages={[...prevItem.props.messages, message]}
                       onRetry={onRetryMessage}
                       onDelete={onDeleteMessage}
+                      onOpenMedia={handleOpenMedia}
                       isAdmin={isAdmin}
                     />
                   );
@@ -585,6 +602,7 @@ function ChatWindow({
                       messages={[message]}
                       onRetry={onRetryMessage}
                       onDelete={onDeleteMessage}
+                      onOpenMedia={handleOpenMedia}
                       isAdmin={isAdmin}
                     />
                   );
@@ -597,6 +615,7 @@ function ChatWindow({
                     onRetry={onRetryMessage}
                     onEdit={onEditMessage}
                     onDelete={onDeleteMessage}
+                    onOpenMedia={handleOpenMedia}
                     isAdmin={isAdmin}
                   />
                 );
@@ -1004,6 +1023,15 @@ function ChatWindow({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── In-app media carousel (replaces opening images/videos in a browser tab) ── */}
+      <ImageLightbox
+        open={lightboxStart !== null}
+        images={roomMedia}
+        index={lightboxStart ?? 0}
+        onClose={() => setLightboxStart(null)}
+        token={token}
+      />
     </Box>
   );
 }

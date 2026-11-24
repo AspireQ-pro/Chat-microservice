@@ -8,7 +8,7 @@ import { API_BASE } from '../features/media/upload'
 import {
   Check, AccessTime, Close, Send,
   Download, InsertDriveFile, PictureAsPdf, TableChart, Slideshow,
-  Description, AudioFile, VideoFile, Archive, TextSnippet,
+  Description, AudioFile, VideoFile, Archive, TextSnippet, PlayArrow,
 } from '@mui/icons-material'
 import { openFile, downloadFile, resolveMime } from '../utils/fileOpener'
 import MessageActionsMenu from './MessageActionsMenu'
@@ -74,7 +74,7 @@ function authFetch(url, token) {
 }
 
 /* ─── Main component ──────────────────────────────────────────────────────── */
-function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
+function MessageBubble({ message, onRetry, onEdit, onDelete, onOpenMedia, isAdmin }) {
   const failed = message.mine && message.status === 'failed'
   const token  = useSelector((state) => state.auth.token)
 
@@ -200,17 +200,19 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
     }
   }, [opening, proxyUrl, message.mimeType, message.fileName, message.fileType, token])
 
-  /* ── Open image: if the blob is already loaded, open that object URL
-     directly — avoids a redundant round-trip to the backend.
-     Falls back to the full openFile waterfall if the blob isn't ready. ── */
-  const handleOpenImage = useCallback((e) => {
+  /* ── Open media (image or video): show the in-app carousel (ImageLightbox)
+     instead of opening a new browser tab. Falls back to the openFile
+     waterfall only when the parent doesn't provide an onOpenMedia handler. ── */
+  const handleOpenMedia = useCallback((e) => {
     e?.stopPropagation()
-    if (mediaBlobUrl) {
+    if (onOpenMedia) {
+      onOpenMedia(message)
+    } else if (mediaBlobUrl) {
       window.open(mediaBlobUrl, '_blank', 'noopener,noreferrer')
     } else {
       handleOpenFile(e)
     }
-  }, [mediaBlobUrl, handleOpenFile])
+  }, [onOpenMedia, message, mediaBlobUrl, handleOpenFile])
 
   /* ── Explicit download — uses downloadFile() from fileOpener ── */
   const [downloading, setDownloading] = useState(false)
@@ -382,8 +384,10 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
 
             {/* ── Image ──────────────────────────────────────────────────────
                 Blob is loaded with auth and rendered inline as a thumbnail.
-                Clicking the image opens it in a new browser tab (native viewer).
-                A download button is overlaid in the bottom-right corner. ── */}
+                Clicking opens the in-app image carousel (ImageLightbox),
+                which lets you swipe/arrow through all images in the room —
+                no new browser tab. A download button is overlaid in the
+                bottom-right corner. ── */}
             {message.fileUrl && isImage && (
               mediaLoading ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
@@ -410,7 +414,7 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                     component="img" src={mediaBlobUrl}
                     alt={displayName || 'Chat attachment'}
                     loading="lazy"
-                    onClick={handleOpenImage}
+                    onClick={handleOpenMedia}
                     sx={{
                       display: 'block', width: '100%', maxWidth: 260,
                       height: 'auto', maxHeight: 260, objectFit: 'cover',
@@ -477,8 +481,10 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
             )}
 
             {/* ── Video ──────────────────────────────────────────────────────
-                Inline <video controls> player using an auth-fetched blob URL.
-                No click-to-open — the player is the interaction. ── */}
+                Rendered as a tappable preview (first frame + play overlay).
+                Clicking opens the in-app media carousel (ImageLightbox), which
+                plays the video full-screen with controls — inline playback is
+                replaced by the viewer for consistency with images. ── */}
             {message.fileUrl && isVideo && (
               mediaLoading ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
@@ -493,9 +499,30 @@ function MessageBubble({ message, onRetry, onEdit, onDelete, isAdmin }) {
                 </Box>
               ) : mediaBlobUrl ? (
                 <Box sx={{ mt: message.text ? 1 : 0.25 }}>
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video controls src={mediaBlobUrl}
-                    style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, display: 'block' }} />
+                  <Box
+                    onClick={handleOpenMedia}
+                    sx={{ position: 'relative', cursor: 'pointer', borderRadius: 1, overflow: 'hidden' }}
+                  >
+                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                    <video
+                      src={mediaBlobUrl}
+                      preload="metadata"
+                      style={{ display: 'block', maxWidth: '100%', maxHeight: 220, borderRadius: 8 }}
+                    />
+                    {/* Play overlay */}
+                    <Box sx={{
+                      position: 'absolute', inset: 0, display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', pointerEvents: 'none',
+                    }}>
+                      <Box sx={{
+                        width: 48, height: 48, borderRadius: '50%',
+                        bgcolor: 'rgba(0,0,0,0.55)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <PlayArrow sx={{ color: '#fff', fontSize: 28 }} />
+                      </Box>
+                    </Box>
+                  </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25 }}>
                     <Typography variant="caption" noWrap sx={{ opacity: 0.8, maxWidth: 180, fontSize: '0.65rem' }}>{displayName}</Typography>
                     {displaySize && <Typography variant="caption" sx={{ opacity: 0.55, fontSize: '0.6rem', flexShrink: 0 }}>{displaySize}</Typography>}

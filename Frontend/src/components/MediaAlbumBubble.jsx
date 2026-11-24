@@ -4,7 +4,7 @@ import {
   Box, Typography, IconButton, Tooltip, CircularProgress,
 } from '@mui/material'
 import {
-  AccessTime, Check, Download,
+  AccessTime, Check, Download, PlayArrow,
   InsertDriveFile, PictureAsPdf, TableChart, Slideshow,
   Description, AudioFile, VideoFile, Archive, TextSnippet,
 } from '@mui/icons-material'
@@ -53,7 +53,7 @@ function FileIcon({ fileName, fileType }) {
 }
 
 /* ─── Single tile inside the album grid ──────────────────────────────────── */
-function AlbumTile({ message, totalCount, index, onDelete, isAdmin }) {
+function AlbumTile({ message, totalCount, index, onDelete, onOpenMedia, isAdmin }) {
   const token  = useSelector((s) => s.auth.token)
   const isMine = message.mine
 
@@ -211,7 +211,7 @@ function AlbumTile({ message, totalCount, index, onDelete, isAdmin }) {
               src={blobUrl}
               alt={message.fileName || 'image'}
               loading="lazy"
-              onClick={() => window.open(blobUrl, '_blank', 'noopener,noreferrer')}
+              onClick={() => onOpenMedia?.(message)}
               sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', cursor: 'zoom-in' }}
             />
             <Tooltip title="Download">
@@ -248,12 +248,30 @@ function AlbumTile({ message, totalCount, index, onDelete, isAdmin }) {
             <CircularProgress size={22} sx={{ color: '#ccc' }} />
           </Box>
         ) : blobUrl ? (
-          /* eslint-disable-next-line jsx-a11y/media-has-caption */
-          <video
-            src={blobUrl}
-            controls
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
+          <Box
+            onClick={() => onOpenMedia?.(message)}
+            sx={{ position: 'relative', width: '100%', height: '100%', cursor: 'pointer' }}
+          >
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              src={blobUrl}
+              preload="metadata"
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+            {/* Play overlay */}
+            <Box sx={{
+              position: 'absolute', inset: 0, display: 'flex',
+              alignItems: 'center', justifyContent: 'center', pointerEvents: 'none',
+            }}>
+              <Box sx={{
+                width: 40, height: 40, borderRadius: '50%',
+                bgcolor: 'rgba(0,0,0,0.55)', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <PlayArrow sx={{ color: '#fff', fontSize: 24 }} />
+              </Box>
+            </Box>
+          </Box>
         ) : (
           <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <CircularProgress size={22} sx={{ color: '#ccc' }} />
@@ -319,7 +337,7 @@ function AlbumTile({ message, totalCount, index, onDelete, isAdmin }) {
 }
 
 /* ─── MediaAlbumBubble ────────────────────────────────────────────────────── */
-function MediaAlbumBubble({ groupId, messages, onRetry, onDelete, isAdmin }) {
+function MediaAlbumBubble({ groupId, messages, onRetry, onDelete, onOpenMedia, isAdmin }) {
   if (!messages?.length) return null
 
   const first  = messages[0]
@@ -379,6 +397,7 @@ function MediaAlbumBubble({ groupId, messages, onRetry, onDelete, isAdmin }) {
               totalCount={count}
               index={idx}
               onDelete={onDelete}
+              onOpenMedia={onOpenMedia}
               isAdmin={isAdmin}
             />
           ))}
