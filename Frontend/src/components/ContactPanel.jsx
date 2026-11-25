@@ -375,6 +375,11 @@ function ContactPanel({
                   contact={contact}
                   active={false}
                   lastMessage={getLastMessage(contact.id)}
+                  lastMessageAt={rooms.find(
+                    (room) =>
+                      !room.isGroup &&
+                      room.members?.some((member) => member.userId === contact.id),
+                  )?.lastMessageAt}
                   unread={getUnreadCount(contact.id)}
                   onClick={() => handleSelectContact(contact.id)}
                 />
