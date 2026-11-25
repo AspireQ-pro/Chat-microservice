@@ -2,16 +2,10 @@ import React from "react";
 import { Box, Typography, Badge } from "@mui/material";
 import { Circle } from "@mui/icons-material";
 import AuthenticatedAvatar from "../features/media/AuthenticatedAvatar";
+import formatChatListTime from "../utils/formatChatListTime";
 
-function formatTime(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  if (isNaN(d)) return "";
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function ContactItem({ contact, active, lastMessage, unread, onClick }) {
-  const timeLabel = formatTime(contact.lastMessageAt || contact.lastSeenAt);
+function ContactItem({ contact, active, lastMessage, lastMessageAt, unread, onClick }) {
+  const timeLabel = formatChatListTime(lastMessageAt);
 
   return (
     <Box
