@@ -16,10 +16,16 @@
  *      (after await fetch), so the browser treats it as a popup and blocks it.
  *
  *  Desktop browser
- *    → Try Web Share API (supported on some desktops like macOS Safari/Chrome).
- *    → Otherwise fetch the blob with auth and call window.open(blob:) in a
- *      new tab. For browser-renderable types this renders inline; for
- *      everything else the browser hands it to the OS default app.
+ *    → For browser-renderable types (PDF, images, text, video, audio):
+ *      1. POST /uploads/:filename/token to get a 60-second view token.
+ *      2. window.open(url?t=token) in a new tab.
+ *      The browser fetches the URL directly (no custom headers needed), so the
+ *      server's Content-Disposition: inline; filename="report.pdf" header is
+ *      visible to the browser — the tab title AND the PDF viewer's "Save"
+ *      button both show the real filename.
+ *    → For non-renderable types (docx, xlsx, zip…): same token approach, but
+ *      the browser will auto-download the file with the correct filename anyway.
+ *    → Falls back to the blob-in-tab approach if the token endpoint fails.
  *
  * Download is always an explicit action — nothing auto-downloads.
  */
@@ -83,6 +89,112 @@ async function authFetch(url, token) {
     if (token) headers = { Authorization: `Bearer ${token}` }
   }
   return fetch(url, { headers })
+}
+
+/**
+ * Request a short-lived view token from the backend for a specific attachment.
+ *
+ * The token is a 60-second JWT scoped to (projectId, roomId, filename).  It can
+ * be passed as ?t=<token> on the download URL so the browser can open the file
+ * in a new tab without an Authorization header — which means the browser's
+ * native PDF viewer / media viewer receives the real Content-Disposition header
+ * from the server and shows the original filename in the tab title and save dialog.
+ *
+ * @param {string} fileUrl  - Backend proxy URL e.g. …/api/rooms/x/uploads/y.pdf
+ * @param {string} token    - User JWT for auth
+ * @returns {Promise<string|null>} view token, or null on failure
+ */
+async function fetchViewToken(fileUrl, token) {
+  try {
+    const res = await authFetch(`${fileUrl}/token`, token)
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.token || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Open a backend URL in a new tab using a short-lived view token.
+ * Falls back to blob-in-tab if the token request fails.
+ *
+ * @param {string}      fileUrl  - Backend proxy URL
+ * @param {string}      token    - User JWT
+ * @param {string}      mime     - Resolved MIME type
+ * @param {string}      fileName - Original filename
+ * @returns {Promise<Window|null>}
+ */
+async function openUrlInTab(fileUrl, token, mime, fileName) {
+  // ── Preferred path: view token → direct URL with real Content-Disposition ──
+  const viewToken = await fetchViewToken(fileUrl, token)
+  if (viewToken) {
+    const url = `${fileUrl}?t=${encodeURIComponent(viewToken)}`
+    const tab = window.open(url, '_blank', 'noopener,noreferrer')
+    if (tab) return tab
+  }
+
+  // ── Fallback: fetch blob → open in HTML wrapper with correct <title> ───────
+  // Used when the token endpoint is unreachable or the popup was blocked.
+  try {
+    const res = await authFetch(fileUrl, token)
+    if (res.ok) {
+      const blob = await res.blob()
+      return openBlobInTab(blob, mime, fileName)
+    }
+  } catch (err) {
+    console.warn('[fileOpener] blob fallback failed', err)
+  }
+  return null
+}
+
+/**
+ * Open a blob in a new browser tab wrapped in an HTML shell that sets <title>.
+ *
+ * This is the fallback path when the view-token endpoint is unreachable.
+ * For browser-renderable types the content is embedded in a full-viewport
+ * <iframe> so the tab title reads the real filename instead of a UUID.
+ *
+ * @param {Blob}   blob
+ * @param {string} mime
+ * @param {string} fileName
+ * @returns {Window|null}
+ */
+function openBlobInTab(blob, mime, fileName) {
+  const typedBlob = new Blob([blob], { type: mime })
+  const contentUrl = URL.createObjectURL(typedBlob)
+  const safeTitle = (fileName || 'File').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+  if (isBrowserRenderable(mime, fileName)) {
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${safeTitle}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #525659; }
+    iframe { width: 100%; height: 100%; border: none; display: block; }
+  </style>
+</head>
+<body>
+  <iframe src="${contentUrl}" title="${safeTitle}"></iframe>
+</body>
+</html>`
+    const wrapperBlob = new Blob([html], { type: 'text/html' })
+    const wrapperUrl = URL.createObjectURL(wrapperBlob)
+    const tab = window.open(wrapperUrl, '_blank', 'noopener,noreferrer')
+    setTimeout(() => {
+      URL.revokeObjectURL(wrapperUrl)
+      URL.revokeObjectURL(contentUrl)
+    }, 60000)
+    return tab || null
+  }
+
+  // Non-renderable: open blob directly (browser will auto-download).
+  const tab = window.open(contentUrl, '_blank', 'noopener,noreferrer')
+  setTimeout(() => URL.revokeObjectURL(contentUrl), 60000)
+  return tab || null
 }
 
 /**
@@ -177,14 +289,18 @@ export async function openFile({ url, fileName, mimeType, fileType, token = null
       return { handled: true }
     }
 
-    // On desktop with blob: fall through to window.open below, reusing the blob.
-    if (blob) {
-      const typedBlob = new Blob([blob], { type: mime })
-      const blobUrl = URL.createObjectURL(typedBlob)
-      const tab = window.open(blobUrl, '_blank', 'noopener,noreferrer')
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+    // On desktop with blob — still prefer the token path so the PDF viewer gets
+    // the real filename, but we have a blob ready as a fallback.
+    if (blob && !mobile) {
+      const viewToken = await fetchViewToken(url, token)
+      if (viewToken) {
+        const tabUrl = `${url}?t=${encodeURIComponent(viewToken)}`
+        const tab = window.open(tabUrl, '_blank', 'noopener,noreferrer')
+        if (tab) return { handled: true }
+      }
+      // Token path failed — use the blob we already have.
+      const tab = openBlobInTab(blob, mime, fileName)
       if (tab) return { handled: true }
-      URL.revokeObjectURL(blobUrl)
     }
   }
 
@@ -206,22 +322,14 @@ export async function openFile({ url, fileName, mimeType, fileType, token = null
     return { handled: false }
   }
 
-  // ── 5. Desktop — fetch blob → window.open ────────────────────────────────
-  //    Renderable types open inline; others trigger the OS default handler.
-  try {
-    const res = await authFetch(url, token)
-    if (res.ok) {
-      const blob = await res.blob()
-      const typedBlob = new Blob([blob], { type: mime })
-      const blobUrl = URL.createObjectURL(typedBlob)
-      const tab = window.open(blobUrl, '_blank', 'noopener,noreferrer')
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
-      if (tab) return { handled: true }
-      URL.revokeObjectURL(blobUrl)
-    }
-  } catch (err) {
-    console.warn('[fileOpener] desktop blob open failed', err)
-  }
+  // ── 5. Desktop — view token → direct URL with real Content-Disposition ────
+  //    POST /token to get a 60s JWT, then window.open(url?t=token).
+  //    The browser fetches the file as a normal HTTP request, so it sees the
+  //    server's Content-Disposition: inline; filename="report.pdf" header.
+  //    Result: tab title = "report.pdf", PDF viewer's Save button = "report.pdf".
+  //    Falls back to blob-in-tab wrapper if the token endpoint is unreachable.
+  const tab = await openUrlInTab(url, token, mime, fileName)
+  if (tab) return { handled: true }
 
   return { handled: false }
 }

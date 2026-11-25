@@ -99,8 +99,94 @@ app.post(
   }),
 );
 
+// ─── Issue a short-lived view token for a specific attachment ─────────────────
+// POST /api/rooms/:roomId/uploads/:filename/token
+//
+// Returns a one-time-use JWT (60 s TTL) that can be used as ?t=<token> on the
+// download route.  This lets the frontend open the file in a new browser tab
+// using a plain URL — no Authorization header needed — so the browser's native
+// PDF viewer / media viewer receives the real Content-Disposition filename from
+// the server and shows it in the tab title and "Save" dialog.
+//
+// Security: the token is scoped to the exact (projectId, roomId, filename)
+// triple.  The download route validates that scope before serving the file.
+app.post(
+  `${API_BASE}/rooms/:roomId/uploads/:filename/token`,
+  authenticateChatJWT,
+  asyncHandler(async (req, res) => {
+    const { roomId, filename } = req.params;
+    if (
+      path.basename(filename) !== filename ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,20}$/i.test(filename)
+    ) {
+      return res.status(404).json({ error: "Attachment not found" });
+    }
+
+    // Verify membership — same check the download route performs.
+    const room = await prisma.chatRoom.findFirst({
+      where: {
+        id: roomId,
+        projectId: req.projectId,
+        members: { some: { userId: req.userId } },
+      },
+      select: { id: true },
+    });
+    if (!room) return res.status(404).json({ error: "Attachment not found" });
+
+    // Verify the file is actually referenced by a message in this room.
+    const referenced = await prisma.message.findFirst({
+      where: {
+        roomId,
+        OR: [
+          { fileStorageKey: { endsWith: `/${filename}` } },
+          { fileUrl: { endsWith: `/uploads/${filename}` } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!referenced) return res.status(404).json({ error: "Attachment not found" });
+
+    const viewToken = jwt.sign(
+      {
+        scope: "media-view",
+        projectId: req.projectId,
+        userId: req.userId,
+        roomId,
+        filename,
+      },
+      CHAT_JWT_SECRET,
+      { expiresIn: "60s" },
+    );
+
+    res.json({ token: viewToken });
+  }),
+);
+
 app.get(
   `${API_BASE}/rooms/:roomId/uploads/:filename`,
+  asyncHandler(async (req, res, next) => {
+    // ── Short-lived view token (issued by the /token endpoint above) ──────────
+    // When present as ?t=<jwt>, it replaces the standard Bearer auth so the
+    // browser can fetch the file directly in a new tab (no custom headers).
+    // The token is scoped to this exact (projectId, roomId, filename) triple.
+    const viewToken = req.query.t;
+    if (viewToken) {
+      try {
+        const payload = jwt.verify(viewToken, CHAT_JWT_SECRET);
+        if (
+          payload.scope === 'media-view' &&
+          payload.roomId === req.params.roomId &&
+          payload.filename === req.params.filename
+        ) {
+          req.userId    = payload.userId;
+          req.projectId = payload.projectId;
+          return next();
+        }
+      } catch { /* fall through to normal Bearer auth */ }
+      return res.status(401).json({ error: 'Invalid or expired view token' });
+    }
+    next();
+  }),
   authenticateChatJWT,
   asyncHandler(async (req, res) => {
     const { roomId, filename } = req.params;
