@@ -23,6 +23,7 @@ import {
   messageDeletedForMe,
   setConnected,
   setOnlineUsers,
+  userDeactivated,
   userOffline,
   removeRoom,
   fetchUsers,
@@ -372,6 +373,10 @@ export function useChatHandler() {
       if (!p?.messageId) return;
       dispatch(messageDeletedForMe(p));
     };
+    const onUserDeactivated = (p) => {
+      if (!p?.userId) return;
+      dispatch(userDeactivated(p));
+    };
 
     socket.on("connect", onConnectWithReconnect);
     socket.on("disconnect", onDisconnect);
@@ -391,6 +396,7 @@ export function useChatHandler() {
     socket.on("message_edited", onMessageEdited);
     socket.on("message_deleted", onMessageDeleted);
     socket.on("message_deleted_for_me", onMessageDeletedForMe);
+    socket.on("user_deactivated", onUserDeactivated);
 
     if (socket.connected) onConnectWithReconnect();
 
@@ -413,6 +419,7 @@ export function useChatHandler() {
       socket.off("message_edited", onMessageEdited);
       socket.off("message_deleted", onMessageDeleted);
       socket.off("message_deleted_for_me", onMessageDeletedForMe);
+      socket.off("user_deactivated", onUserDeactivated);
     };
   }, [dispatch, currentUser?.id, authToken]);
 
