@@ -57,11 +57,19 @@ function broadcastOnlineUsers(projectId) {
   io.to(`project:${projectId}`).emit("online_users", userIds);
 }
 
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.query?.token;
   if (!token) return next(new Error("Authentication required"));
   try {
     const payload = jwt.verify(token, CHAT_JWT_SECRET);
+    // Reject deactivated users even if their JWT has not expired yet.
+    const user = await prisma.chatUser.findUnique({
+      where: { id: payload.userId },
+      select: { deletedAt: true },
+    });
+    if (!user || user.deletedAt) {
+      return next(new Error("Account has been deactivated"));
+    }
     socket.userId = payload.userId;
     socket.projectId = payload.projectId;
     socket.plan = payload.plan;

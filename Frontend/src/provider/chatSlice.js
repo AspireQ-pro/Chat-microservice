@@ -885,6 +885,13 @@ const chatSlice = createSlice({
       delete state.pagination[roomId];
       delete state.unreadCounts[roomId];
     },
+    // Remove a deactivated user from the contacts list so they no longer appear
+    // in "Add Members" or "Create Group" member pickers. Their existing rooms
+    // and messages are unaffected.
+    userDeactivated(state, { payload: { userId } }) {
+      if (!userId) return;
+      state.contacts = state.contacts.filter((c) => c.id !== userId);
+    },
     clearChat(state) {
       state.contacts = [];
       state.rooms = [];
@@ -1103,6 +1110,7 @@ export const {
   removeRoom,
   clearChat,
   roomBlockStatusUpdated,
+  userDeactivated,
 } = chatSlice.actions;
 
 export default chatSlice.reducer;

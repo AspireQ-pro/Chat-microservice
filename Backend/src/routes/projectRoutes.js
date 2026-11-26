@@ -320,6 +320,16 @@ app.post(
     // reconcile removals after every supplied user was synced successfully.
     if (errors.length === 0) {
       const activeExternalUserIds = [...new Set(users.map((u) => String(u.id)))];
+      // Collect the internal chat-user IDs before soft-deleting so we can
+      // disconnect their sockets and notify the project.
+      const toDeactivate = await prisma.chatUser.findMany({
+        where: {
+          projectId: req.project.id,
+          deletedAt: null,
+          externalUserId: { notIn: activeExternalUserIds },
+        },
+        select: { id: true },
+      });
       const result = await prisma.chatUser.updateMany({
         where: {
           projectId: req.project.id,
@@ -329,6 +339,19 @@ app.post(
         data: { deletedAt: new Date() },
       });
       deactivated = result.count;
+      // Kick sockets and broadcast deactivation for each removed user.
+      if (io && toDeactivate.length) {
+        for (const { id: chatUserId } of toDeactivate) {
+          io.to(`user:${chatUserId}`).emit("account_deactivated", {
+            userId: chatUserId,
+          });
+          io.to(`project:${req.project.id}`).emit("user_deactivated", {
+            userId: chatUserId,
+          });
+          const sockets = await io.in(`user:${chatUserId}`).fetchSockets();
+          for (const s of sockets) s.disconnect(true);
+        }
+      }
     }
 
     res.json({ success: true, synced, total: users.length, deactivated, errors });
@@ -369,6 +392,19 @@ app.delete(
         where: { id: chatUser.id },
         data: { deletedAt: new Date() },
       });
+      // Kick any active socket connections for this user and notify all
+      // project members so their contact/member lists update immediately.
+      if (io) {
+        io.to(`user:${chatUser.id}`).emit("account_deactivated", {
+          userId: chatUser.id,
+        });
+        io.to(`project:${req.project.id}`).emit("user_deactivated", {
+          userId: chatUser.id,
+        });
+        // Disconnect the user's sockets after the events have been flushed.
+        const sockets = await io.in(`user:${chatUser.id}`).fetchSockets();
+        for (const s of sockets) s.disconnect(true);
+      }
     }
     res.json({ success: true, deleted: true, externalUserId, chatUserId: chatUser.id });
   }),
