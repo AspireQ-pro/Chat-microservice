@@ -179,9 +179,37 @@ export function useChatHandler() {
     }
   }, [currentUser?.allowDirectChat, currentUser?.allowGroupChat, activeRoom, selectedContactId, dispatch]);
 
+  // Build a contact-shaped object for users who have a direct room but are no
+  // longer in state.contacts (i.e. deleted from the society). Their rooms and
+  // history must still be visible; they just can't receive new messages.
+  const contactIds = new Set(contacts.map((c) => c.id));
+  const ghostContacts = rooms
+    .filter((r) => !r.isGroup)
+    .flatMap((r) => {
+      const other = r.members?.find((m) => m.userId !== chatUserId);
+      if (!other || contactIds.has(other.userId)) return [];
+      const u = other.user || {};
+      const name = u.name || other.userId;
+      return [{
+        id: other.userId,
+        name,
+        email: u.email || null,
+        role: u.role || "member",
+        lastSeenAt: u.lastSeenAt || null,
+        avatarUrl: u.avatarUrl || null,
+        avatar: name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2),
+        online: false,
+        isDeactivated: true,
+      }];
+    })
+    // deduplicate — one user could theoretically have multiple rooms
+    .filter((g, i, arr) => arr.findIndex((x) => x.id === g.id) === i);
+
+  const allContacts = [...contacts, ...ghostContacts];
+
   const activeContact = (() => {
     if (!activeRoom) {
-      return contacts.find((contact) => contact.id === selectedContactId) ?? null;
+      return allContacts.find((contact) => contact.id === selectedContactId) ?? null;
     }
     if (activeRoom.isGroup) {
       return {
@@ -197,7 +225,7 @@ export function useChatHandler() {
     const partnerMember = activeRoom.members?.find(
       (m) => m.userId !== chatUserId,
     );
-    const partner = contacts.find((c) => c.id === partnerMember?.userId);
+    const partner = allContacts.find((c) => c.id === partnerMember?.userId);
     return partner ?? null;
   })();
 
@@ -205,7 +233,7 @@ export function useChatHandler() {
   const messages = rawMessages;
   const activePagination = activeRoomId ? pagination[activeRoomId] : null;
 
-  const filteredContacts = contacts
+  const filteredContacts = allContacts
     .filter((contact) =>
       (contact.name || "").toLowerCase().includes(search.toLowerCase()),
     )
