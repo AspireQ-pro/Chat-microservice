@@ -473,6 +473,9 @@ function GroupInfoDialog({
                 const isCreator = m.userId === createdById
                 const isRemoving = removingId === m.userId
                 const isPromoting = promotingId === m.userId
+                // Society-deleted users: keep visible but suppress all action
+                // buttons and replace the role chip with "Not a member".
+                const isDeactivated = Boolean(user.deletedAt)
 
                 return (
                   <Box key={m.userId || idx}>
@@ -483,6 +486,7 @@ function GroupInfoDialog({
                         px: 1.75,
                         py: 1.25,
                         gap: 1.5,
+                        opacity: isDeactivated ? 0.6 : 1,
                       }}
                     >
                       <AuthenticatedAvatar
@@ -505,9 +509,22 @@ function GroupInfoDialog({
                           <Typography variant="body2" fontWeight={600} noWrap>
                             {isMe ? 'You' : (user.name || 'Unknown')}
                           </Typography>
-                          {isMemberAdmin && (
+                          {isDeactivated ? (
                             <Chip
-                              label={isCreator ? 'Admin' : 'Admin'}
+                              label="Not a member"
+                              size="small"
+                              sx={{
+                                height: 18,
+                                fontSize: '0.6rem',
+                                fontWeight: 700,
+                                bgcolor: '#F5F5F5',
+                                color: '#9E9E9E',
+                                borderRadius: '6px',
+                              }}
+                            />
+                          ) : isMemberAdmin ? (
+                            <Chip
+                              label="Admin"
                               size="small"
                               sx={{
                                 height: 18,
@@ -518,8 +535,7 @@ function GroupInfoDialog({
                                 borderRadius: '6px',
                               }}
                             />
-                          )}
-                          {isMe && !isMemberAdmin && (
+                          ) : isMe ? (
                             <Chip
                               label="You"
                               size="small"
@@ -532,7 +548,7 @@ function GroupInfoDialog({
                                 borderRadius: '6px',
                               }}
                             />
-                          )}
+                          ) : null}
                         </Box>
                         <Typography variant="caption" color="text.disabled" noWrap sx={{ display: 'block' }}>
                           {user.email || ''}
@@ -540,8 +556,8 @@ function GroupInfoDialog({
                         </Typography>
                       </Box>
 
-                      {/* Admin actions: promote or remove non-admin members */}
-                      {isOwner && !isMe && !isMemberAdmin && (
+                      {/* Admin actions: only for active (non-deactivated) non-admin members */}
+                      {isOwner && !isMe && !isMemberAdmin && !isDeactivated && (
                         <Box sx={{ display: 'flex', gap: 0.5, flexShrink: 0 }}>
                           <Tooltip title="Make Admin">
                             <IconButton

@@ -629,7 +629,27 @@ function ChatWindow({
       </Box>
 
       {/* ── Bottom area ── */}
-      {isPendingRequest && !isRequestSender ? (
+      {otherUserDeactivated ? (
+        /* The other user has been removed from the society — takes priority over
+           all other states including pending requests */
+        <Box
+          sx={{
+            px: 2,
+            py: 1.75,
+            borderTop: "1px solid",
+            borderColor: "divider",
+            bgcolor: "background.paper",
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+          }}
+        >
+          <Block sx={{ fontSize: 20, color: "#9e9e9e" }} />
+          <Typography variant="body2" color="text.secondary">
+            {activeContact.name} is no longer a member. You cannot send new messages.
+          </Typography>
+        </Box>
+      ) : isPendingRequest && !isRequestSender ? (
         /* Accept request banner */
         <Box
           sx={{
@@ -725,25 +745,6 @@ function ChatWindow({
           <Block sx={{ fontSize: 20, color: "#9e9e9e" }} />
           <Typography variant="body2" color="text.secondary">
             You can no longer send messages to {activeContact.name}.
-          </Typography>
-        </Box>
-      ) : otherUserDeactivated ? (
-        /* The other user has been removed from the society */
-        <Box
-          sx={{
-            px: 2,
-            py: 1.75,
-            borderTop: "1px solid",
-            borderColor: "divider",
-            bgcolor: "background.paper",
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-          }}
-        >
-          <Block sx={{ fontSize: 20, color: "#9e9e9e" }} />
-          <Typography variant="body2" color="text.secondary">
-            {activeContact.name} is no longer a member. You cannot send new messages.
           </Typography>
         </Box>
       ) : (
