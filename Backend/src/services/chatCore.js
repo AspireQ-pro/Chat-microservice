@@ -189,6 +189,14 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
       }
     }
 
+    // For direct rooms, flag when the other party has been deactivated so the
+    // client can disable the send input while keeping the room and history visible.
+    let otherUserDeactivated = false;
+    if (!room.isGroup && members && members.length === 2) {
+      const other = members.find((m) => m.userId !== userId);
+      if (other?.user?.deletedAt) otherUserDeactivated = true;
+    }
+
     return {
       ...publicRoom,
       ...(members ? { members } : {}),
@@ -197,6 +205,7 @@ module.exports = function createChatCore({ prisma, config, mediaKey, mediaStorag
       createdById,
       blockedByMe,
       blockedByThem,
+      otherUserDeactivated,
     };
   }
 

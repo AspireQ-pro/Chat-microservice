@@ -888,9 +888,18 @@ const chatSlice = createSlice({
     // Remove a deactivated user from the contacts list so they no longer appear
     // in "Add Members" or "Create Group" member pickers. Their existing rooms
     // and messages are unaffected.
+    // Also flag any direct room with that user so the send input is disabled.
     userDeactivated(state, { payload: { userId } }) {
       if (!userId) return;
       state.contacts = state.contacts.filter((c) => c.id !== userId);
+      // Mark every direct room where this user is the other party so ChatWindow
+      // can disable sending without hiding the room or its history.
+      state.rooms = state.rooms.map((r) => {
+        if (r.isGroup) return r;
+        const isOtherParty = r.members?.some((m) => m.userId === userId);
+        if (!isOtherParty) return r;
+        return { ...r, otherUserDeactivated: true };
+      });
     },
     clearChat(state) {
       state.contacts = [];
