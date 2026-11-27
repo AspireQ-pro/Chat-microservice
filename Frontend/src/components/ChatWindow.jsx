@@ -219,7 +219,8 @@ function ChatWindow({
   // Block status (direct rooms only)
   const blockedByMe   = !activeContact?.isGroup && Boolean(activeRoom?.blockedByMe);
   const blockedByThem = !activeContact?.isGroup && Boolean(activeRoom?.blockedByThem);
-  const isBlocked     = blockedByMe || blockedByThem;
+  const otherUserDeactivated = !activeContact?.isGroup && Boolean(activeRoom?.otherUserDeactivated);
+  const isBlocked     = blockedByMe || blockedByThem || otherUserDeactivated;
 
   // Consolidated disabled flags
   const attachDisabled =
@@ -724,6 +725,25 @@ function ChatWindow({
           <Block sx={{ fontSize: 20, color: "#9e9e9e" }} />
           <Typography variant="body2" color="text.secondary">
             You can no longer send messages to {activeContact.name}.
+          </Typography>
+        </Box>
+      ) : otherUserDeactivated ? (
+        /* The other user has been removed from the society */
+        <Box
+          sx={{
+            px: 2,
+            py: 1.75,
+            borderTop: "1px solid",
+            borderColor: "divider",
+            bgcolor: "background.paper",
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+          }}
+        >
+          <Block sx={{ fontSize: 20, color: "#9e9e9e" }} />
+          <Typography variant="body2" color="text.secondary">
+            {activeContact.name} is no longer a member. You cannot send new messages.
           </Typography>
         </Box>
       ) : (
